@@ -5,7 +5,7 @@
 }
 
 body {
-    width: 280px;
+    width: 360px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 13px;
     color: #24292f;
@@ -115,22 +115,30 @@ body {
     gap: 5px;
 }
 
+.setting-item.row-layout {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .setting-label {
     font-size: 12px;
     color: #24292f;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .shortcut-box {
     display: flex;
     align-items: center;
     gap: 5px;
+    flex-shrink: 0;
 }
 
 .shortcut-input {
-    flex: 1;
-    min-width: 0;
-    padding: 5px 8px;
+    width: 90px;
+    padding: 4px 6px;
     border: 1px solid #d0d7de;
     border-radius: 5px;
     font-size: 11px;
@@ -245,9 +253,4 @@ body {
     text-align: center;
     font-weight: 600;
     transition: opacity 0.2s ease;
-}
-}
-
-.link-btn:hover {
-    color: #0550ae;
 }

@@ -95,6 +95,12 @@
     let nextBarId = 1;
     let activeBar = null;
 
+    // 동적 콘텐츠(SPA/무한 스크롤) 감시 상태 - isHighlighting은 확장 자체 DOM 변경을 무시하기 위한 가드 플래그
+    let domObserver = null;
+    let domObserverTimer = null;
+    let isHighlighting = false;
+    const DOM_OBSERVER_DELAY = 400;
+
     // 북마크 핀 생성 시 내부를 채울 생동감 있는 16가지 고유 색상 목록
     const BOOKMARK_COLORS = [
         '#29b6f6', '#ab47bc', '#26a69a', '#ffa726',
@@ -1385,6 +1391,9 @@
         isBarVisible = true;
         hostElement.style.setProperty('display', 'block', 'important');
 
+        // SPA/무한 스크롤로 늦게 로드되는 콘텐츠도 자동 검색되도록 DOM 감시 시작
+        startDomObserver();
+
         // 페이지 내 드래그된 텍스트가 있으면 초기 검색어로 활용
         const selectedText = window.getSelection()?.toString().trim();
         const initialQuery = (selectedText && selectedText.length < 100) ? selectedText : '';
@@ -1467,6 +1476,9 @@
         saveBarsState();
         isBarVisible = false;
 
+        // 동적 콘텐츠 감시자 해제 (검색창이 닫힌 상태에서는 불필요한 오버헤드)
+        stopDomObserver();
+
         // 컨테이너 숨김 처리
         if (hostElement) {
             hostElement.style.setProperty('display', 'none', 'important');
@@ -1482,27 +1494,36 @@
     }
 
     //------------------------------------------------------------------------------------------------------
-    // 본문 전체에 삽입된 모든 <mark> 하이라이트 요소를 원본 텍스트 노드로 언랩 복원한다.
+    // 본문 및 Shadow DOM/동일 출처 iframe에 삽입된 모든 <mark> 하이라이트를 원본 텍스트 노드로 언랩 복원한다.
     // 성능 최적화: mark별 개별 normalize 호출 대신 부모 노드들을 Set에 모아 한 번씩만 normalize()를 수행한다.
-    // 입력: 없음
+    // 입력: roots - 재사용할 검색 루트 배열 (생략 시 내부에서 직접 수집)
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
-    function cleanAllHighlights() {
-        const marks = document.querySelectorAll('mark.search-ext-highlight');
-        if (marks.length === 0) return;
-
+    function cleanAllHighlights(roots = null) {
+        const rootList = roots || collectSearchRoots();
         const parentsToNormalize = new Set();
-        marks.forEach(mark => {
-            const parent = mark.parentNode;
-            if (parent) {
-                // mark 자식 노드들을 상위로 끌어올린 후 mark 태그 삭제
-                while (mark.firstChild) {
-                    parent.insertBefore(mark.firstChild, mark);
+        let found = 0;
+
+        // 각 루트(본문/Shadow Root/iframe 문서)별로 하이라이트 수집 후 언랩 처리
+        rootList.forEach(root => {
+            let marks;
+            try { marks = root.querySelectorAll('mark.search-ext-highlight'); } catch (e) { return; }
+            found += marks.length;
+
+            marks.forEach(mark => {
+                const parent = mark.parentNode;
+                if (parent) {
+                    // mark 자식 노드들을 상위로 끌어올린 후 mark 태그 삭제
+                    while (mark.firstChild) {
+                        parent.insertBefore(mark.firstChild, mark);
+                    }
+                    parent.removeChild(mark);
+                    parentsToNormalize.add(parent);
                 }
-                parent.removeChild(mark);
-                parentsToNormalize.add(parent);
-            }
+            });
         });
+
+        if (found === 0) return;
 
         // 수집된 부모 노드들에 대해 중복 없이 1회씩만 텍스트 노드 병합 수행
         parentsToNormalize.forEach(p => {
@@ -1569,18 +1590,86 @@
     // 검색바당 최대 렌더링 가능한 하이라이트 노드 상한선 (브라우저 메모리 고갈 및 탭 프리징 방지)
     const MAX_MATCHES_PER_BAR = 1500;
 
+    // Shadow DOM / iframe 중첩 탐색 시 무한 재귀 및 과도한 순회를 막는 깊이 제한
+    const MAX_ROOT_DEPTH = 12;
+
     //------------------------------------------------------------------------------------------------------
-    // 모든 검색바의 패턴을 본문 전체에서 동시에 탐색하여 겹침 없이 하이라이트 요소를 생성한다.
+    // 검색 대상이 되는 모든 DOM 루트를 수집한다 (본문 + open Shadow DOM + 동일 출처 iframe 문서).
+    // 최신 웹앱(Web Components, 문서 뷰어 등)은 텍스트가 Shadow DOM 내부에 존재하여 일반 TreeWalker로는
+    // 접근이 불가능하므로, 각 루트를 개별적으로 순회할 수 있도록 평탄화된 배열로 반환한다.
+    // 입력: root - 탐색 시작 노드, out - 결과 누적 배열, depth - 현재 재귀 깊이
+    // 출력: 검색 가능한 루트 노드 배열
+    //------------------------------------------------------------------------------------------------------
+    function collectSearchRoots(root = document.body, out = [], depth = 0) {
+        if (!root || depth > MAX_ROOT_DEPTH) return out;
+        out.push(root);
+
+        // 현재 루트 내부의 모든 엘리먼트를 훑어 중첩된 Shadow Root / iframe 문서를 재귀 수집
+        let elements;
+        try { elements = root.querySelectorAll('*'); } catch (e) { return out; }
+
+        for (const el of elements) {
+            // 확장 프로그램 자체 UI 호스트는 탐색 대상에서 제외
+            if (el.id === 'chrome-ext-search-root') continue;
+
+            // open 모드 Shadow Root 내부 진입 (closed 모드는 스펙상 접근 불가)
+            if (el.shadowRoot) {
+                collectSearchRoots(el.shadowRoot, out, depth + 1);
+                continue;
+            }
+
+            // 동일 출처 iframe/frame 문서 진입 (교차 출처는 보안 정책상 접근 시 예외 발생 → 무시)
+            const tag = el.tagName;
+            if (tag === 'IFRAME' || tag === 'FRAME') {
+                try {
+                    const doc = el.contentDocument;
+                    if (doc && doc.body) collectSearchRoots(doc.body, out, depth + 1);
+                } catch (e) { /* cross-origin frame: 접근 불가하므로 건너뜀 */ }
+            }
+        }
+        return out;
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 텍스트 노드의 부모 엘리먼트가 실제 화면에 렌더링되는 상태인지 판별한다.
+    // display:none / visibility:hidden 영역의 텍스트는 스크롤 이동이 불가능해 검색 결과에서 제외하되,
+    // 접힌 <details> 내부는 브라우저 기본 검색과 동일하게 검색 대상으로 허용한다.
+    // 입력: el - 검사 대상 엘리먼트, cache - 엘리먼트별 판정 결과 캐시 Map
+    // 출력: 검색 대상 여부 (true/false)
+    //------------------------------------------------------------------------------------------------------
+    function isVisibleForSearch(el, cache) {
+        const cached = cache.get(el);
+        if (cached !== undefined) return cached;
+
+        let visible;
+        // 접힌 <details> 하위는 렌더링되지 않지만 탐색 후 자동 펼침 처리되므로 허용
+        if (el.closest && el.closest('details:not([open])')) visible = true;
+        else if (typeof el.checkVisibility === 'function') visible = el.checkVisibility({ checkVisibilityCSS: true });
+        else visible = !!(el.offsetParent || el.getClientRects().length);
+
+        cache.set(el, visible);
+        return visible;
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 모든 검색바의 패턴을 페이지 전체에서 동시에 탐색하여 겹침 없이 하이라이트 요소를 생성한다.
+    // 검색 범위: 일반 본문 + open Shadow DOM(Web Components) + 동일 출처 iframe 문서
     // 성능 최적화:
     // 1) 일반 문자열 검색 시 정규식 대신 C++ 기반의 indexOf/includes 사전 검사로 비매칭 노드 고속 통과
-    // 2) TreeWalker 제외 태그에 SVG, CANVAS, AUDIO, VIDEO, TEMPLATE 추가
-    // 3) mark 스타일 적용 시 cssText 1회 일괄 할당
-    // 4) MAX_MATCHES_PER_BAR 상한선 보호로 대량 매칭 시에도 브라우저 반응성 유지
+    // 2) TreeWalker에서 비 HTML 네임스페이스(SVG/MathML) 및 비텍스트 태그 사전 제외
+    // 3) 비용이 큰 렌더링 가시성 검사는 텍스트 매칭에 성공한 노드에 대해서만 수행 후 캐싱
+    // 4) mark 스타일 적용 시 cssText 1회 일괄 할당
+    // 5) MAX_MATCHES_PER_BAR 상한선 보호로 대량 매칭 시에도 브라우저 반응성 유지
     // 입력: triggeringBar - 사용자 입력이 발생한 검색바 (자동 스크롤 대상)
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function performAllSearches(triggeringBar = null) {
-        cleanAllHighlights();
+        // 하이라이트 삽입/제거로 인한 자체 DOM 변경을 MutationObserver가 재검색 트리거로 오인하지 않도록 차단
+        isHighlighting = true;
+
+        // 본문 + Shadow DOM + 동일 출처 iframe을 모두 포함한 검색 루트를 1회만 수집하여 재사용
+        const searchRoots = collectSearchRoots();
+        cleanAllHighlights(searchRoots);
 
         // 유효한 검색 패턴이 있는 검색바들만 선별 및 사전 최적화 데이터 캐싱
         const activeSearchBars = [];
@@ -1601,76 +1690,81 @@
         });
 
         if (activeSearchBars.length === 0) {
+            releaseHighlightingFlag();
             return;
         }
 
-        // 웹페이지 본문의 순수 텍스트 노드 순회용 TreeWalker 설정
-        const walker = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            {
-                acceptNode: (node) => {
-                    const parent = node.parentElement;
-                    if (!parent) return NodeFilter.FILTER_REJECT;
+        // 순수 텍스트 노드만 통과시키는 공용 필터 (태그 기반 저비용 판정만 수행)
+        const textNodeFilter = {
+            acceptNode: (node) => {
+                const parent = node.parentElement;
+                if (!parent) return NodeFilter.FILTER_REJECT;
 
-                    const tag = parent.tagName;
-                    // 검색에서 제외할 특수 태그 및 확장 프로그램 자체 UI 필터링 (렌더링되지 않는 비텍스트 태그 추가)
-                    if (
-                        tag === 'SCRIPT' ||
-                        tag === 'STYLE' ||
-                        tag === 'NOSCRIPT' ||
-                        tag === 'TEXTAREA' ||
-                        tag === 'INPUT' ||
-                        tag === 'IFRAME' ||
-                        tag === 'OBJECT' ||
-                        tag === 'SELECT' ||
-                        tag === 'SVG' ||
-                        tag === 'CANVAS' ||
-                        tag === 'AUDIO' ||
-                        tag === 'VIDEO' ||
-                        tag === 'TEMPLATE' ||
-                        parent.id === 'chrome-ext-search-root' ||
-                        parent.closest('#chrome-ext-search-root') ||
-                        parent.isContentEditable
-                    ) {
-                        return NodeFilter.FILTER_REJECT;
-                    }
+                // SVG/MathML 등 비 HTML 네임스페이스는 <mark> 삽입 시 렌더링이 깨지므로 제외
+                if (parent.namespaceURI !== 'http://www.w3.org/1999/xhtml') return NodeFilter.FILTER_REJECT;
 
-                    if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-                    return NodeFilter.FILTER_ACCEPT;
+                const tag = parent.tagName;
+                // 검색에서 제외할 특수 태그 및 확장 프로그램 자체 UI 필터링
+                if (
+                    tag === 'SCRIPT' ||
+                    tag === 'STYLE' ||
+                    tag === 'NOSCRIPT' ||
+                    tag === 'TEXTAREA' ||
+                    tag === 'INPUT' ||
+                    tag === 'IFRAME' ||
+                    tag === 'OBJECT' ||
+                    tag === 'SELECT' ||
+                    tag === 'OPTION' ||
+                    tag === 'CANVAS' ||
+                    tag === 'AUDIO' ||
+                    tag === 'VIDEO' ||
+                    tag === 'TEMPLATE' ||
+                    parent.id === 'chrome-ext-search-root' ||
+                    parent.closest('#chrome-ext-search-root') ||
+                    parent.isContentEditable
+                ) {
+                    return NodeFilter.FILTER_REJECT;
                 }
-            }
-        );
 
-        // 검색 패턴에 부합하는 대상 텍스트 노드 사전 수집 (일반 문자열은 indexOf로 고속 사전 필터링)
+                if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        };
+
+        // 본문 + Shadow DOM + 동일 출처 iframe을 모두 포함한 검색 루트 재사용
+        const visibilityCache = new Map();
         const nodesToProcess = [];
-        let currentNode = walker.nextNode();
-        while (currentNode) {
-            const val = currentNode.nodeValue;
-            let matched = false;
-            for (const item of activeSearchBars) {
-                if (item.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
-                if (item.isSimpleText) {
-                    const hasMatch = item.caseSensitive
-                        ? val.includes(item.raw)
-                        : val.toLowerCase().includes(item.lowerRaw);
-                    if (hasMatch) {
-                        matched = true;
-                        break;
-                    }
-                } else {
-                    item.regex.lastIndex = 0;
-                    if (item.regex.test(val)) {
-                        matched = true;
-                        break;
+
+        // 각 루트별로 텍스트 노드를 순회하며 검색 패턴 부합 노드 수집
+        // (일반 문자열은 정규식 대신 includes로 고속 사전 필터링하고, 비용이 큰 가시성 검사는 매칭 성공 후에만 수행)
+        searchRoots.forEach(root => {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, textNodeFilter);
+            let currentNode = walker.nextNode();
+
+            while (currentNode) {
+                const val = currentNode.nodeValue;
+                let matched = false;
+
+                for (const item of activeSearchBars) {
+                    if (item.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
+                    if (item.isSimpleText) {
+                        const hasMatch = item.caseSensitive
+                            ? val.includes(item.raw)
+                            : val.toLowerCase().includes(item.lowerRaw);
+                        if (hasMatch) { matched = true; break; }
+                    } else {
+                        item.regex.lastIndex = 0;
+                        if (item.regex.test(val)) { matched = true; break; }
                     }
                 }
+
+                // 화면에 렌더링되지 않는(display:none 등) 영역은 이동이 불가능하므로 최종 제외
+                if (matched && isVisibleForSearch(currentNode.parentElement, visibilityCache)) {
+                    nodesToProcess.push(currentNode);
+                }
+                currentNode = walker.nextNode();
             }
-            if (matched) {
-                nodesToProcess.push(currentNode);
-            }
-            currentNode = walker.nextNode();
-        }
+        });
 
         // 각 텍스트 노드별 일치 구간 분할 및 <mark> 태그 교체
         nodesToProcess.forEach(textNode => {
@@ -1767,6 +1861,18 @@
         if (triggeringBar && config.autoMove && triggeringBar.matches.length > 0) {
             scrollToCurrentMatch(triggeringBar);
         }
+
+        releaseHighlightingFlag();
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 하이라이트 작업 종료 플래그를 마이크로태스크 이후에 해제한다.
+    // MutationObserver 콜백은 마이크로태스크로 전달되므로 즉시 해제하면 자체 변경을 감지해 무한 재검색이 발생한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function releaseHighlightingFlag() {
+        setTimeout(() => { isHighlighting = false; }, 0);
     }
 
     //------------------------------------------------------------------------------------------------------
@@ -1812,13 +1918,59 @@
     function scrollToCurrentMatch(bar) {
         if (bar.currentIndex < 0 || bar.currentIndex >= bar.matches.length) return;
         const target = bar.matches[bar.currentIndex];
-        if (target) {
-            target.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center',
-                inline: 'nearest'
-            });
+        if (!target) return;
+
+        // 접힌 <details> 내부에 위치한 경우 상위 요소를 모두 펼쳐야 화면에 노출됨
+        let ancestor = target.parentElement;
+        while (ancestor) {
+            if (ancestor.tagName === 'DETAILS' && !ancestor.open) ancestor.open = true;
+            ancestor = ancestor.parentElement;
         }
+
+        target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest'
+        });
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // SPA/무한 스크롤처럼 동적으로 추가되는 콘텐츠를 감지해 현재 검색어를 자동 재적용한다.
+    // 확장 자체 하이라이트 삽입으로 인한 무한 루프를 막기 위해 isHighlighting 플래그와 디바운스를 사용한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function startDomObserver() {
+        if (domObserver || !document.body) return;
+
+        domObserver = new MutationObserver((mutations) => {
+            if (isHighlighting || !isBarVisible) return;
+            if (!bars.some(b => b.query && b.query.trim())) return;
+
+            // 실제 텍스트를 가진 노드가 새로 추가된 경우에만 재검색 (시계/애니메이션 등 무의미한 변경 무시)
+            const hasNewText = mutations.some(m =>
+                m.type === 'childList' &&
+                Array.from(m.addedNodes).some(n =>
+                    (n.nodeType === Node.TEXT_NODE || n.nodeType === Node.ELEMENT_NODE) &&
+                    n.textContent && n.textContent.trim() &&
+                    !(n.nodeType === Node.ELEMENT_NODE && n.id === 'chrome-ext-search-root')
+                )
+            );
+            if (!hasNewText) return;
+
+            clearTimeout(domObserverTimer);
+            domObserverTimer = setTimeout(() => {
+                if (!isHighlighting && isBarVisible) performAllSearches(null);
+            }, DOM_OBSERVER_DELAY);
+        });
+
+        domObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // 검색창을 닫을 때 감시자를 해제하여 불필요한 오버헤드 제거
+    function stopDomObserver() {
+        if (domObserver) { domObserver.disconnect(); domObserver = null; }
+        clearTimeout(domObserverTimer);
     }
 
 // ## 단계 900: 키보드 내비게이션 및 전역 단축키 핸들러

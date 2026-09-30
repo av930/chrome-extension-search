@@ -1,15 +1,20 @@
+﻿// ==========================================================================================================
 // content.js - In-page text search script with multiple search bars, distinct highlight colors, and navigation
+// 웹 페이지 본문에 삽입되어 다중 검색바 오버레이, 실시간 증분 하이라이트, 북마크 및 텍스트 선택 확장을 수행하는 스크립트.
+// ==========================================================================================================
 
 (function () {
     'use strict';
 
-    // Prevent duplicate injection
+    // 중복 스크립트 실행 방지 플래그 검사
     if (window.__chromeSearchExtensionLoaded) {
         return;
     }
     window.__chromeSearchExtensionLoaded = true;
 
-    // Distinct highlight color palettes for multiple search bars
+// ## 단계 100: 검색바 고유 하이라이트 팔레트 및 전역 상태 정의
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // 다중 검색바별로 자동 할당되는 6가지 테마 색상 팔레트
     const COLOR_PALETTES = [
         {
             name: 'yellow',
@@ -67,7 +72,7 @@
         }
     ];
 
-    // Global configuration from storage
+    // 스토리지와 동기화되는 전역 확장 프로그램 설정 객체
     let config = {
         shortcut: { ctrl: true, alt: false, shift: false, meta: false, key: 'f' },
         highlightColor: '#ffe600',
@@ -78,7 +83,7 @@
         ignoreDelimiters: '-'
     };
 
-    // State
+    // UI 인스턴스 및 런타임 제어 상태 변수
     let isBarVisible = false;
     let shadowRoot = null;
     let hostElement = null;
@@ -90,7 +95,7 @@
     let nextBarId = 1;
     let activeBar = null;
 
-    // Predefined vibrant colors for bookmark pins
+    // 북마크 핀 생성 시 내부를 채울 생동감 있는 16가지 고유 색상 목록
     const BOOKMARK_COLORS = [
         '#29b6f6', '#ab47bc', '#26a69a', '#ffa726',
         '#ef5350', '#ec407a', '#7e57c2', '#42a5f5',
@@ -98,33 +103,48 @@
         '#ffee58', '#ffca28', '#8d6e63', '#78909c'
     ];
 
+    //------------------------------------------------------------------------------------------------------
+    // 북마크 핀 아이콘에 할당할 랜덤 색상 코드를 반환한다.
+    // 입력: 없음
+    // 출력: 16진수 색상 코드 문자열 (예: '#29b6f6')
+    //------------------------------------------------------------------------------------------------------
     function getRandomBookmarkColor() {
         return BOOKMARK_COLORS[Math.floor(Math.random() * BOOKMARK_COLORS.length)];
     }
 
-    // Load bookmarks from chrome.storage.local
+// ## 단계 200: 스토리지 데이터 동기화 및 영구 저장 관리
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // chrome.storage.local에 저장된 북마크 배열 데이터를 비동기 조회하여 메모리에 로드한다.
+    // 입력: callback - 로드 완료 후 실행할 콜백 함수
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function loadBookmarks(callback) {
         if (!chrome.runtime?.id) {
             if (callback) callback();
             return;
         }
         chrome.storage.local.get(['bookmarks'], (result) => {
-            if (Array.isArray(result.bookmarks)) {
-                bookmarks = result.bookmarks;
-            } else {
-                bookmarks = [];
-            }
+            bookmarks = Array.isArray(result.bookmarks) ? result.bookmarks : [];
             if (callback) callback();
         });
     }
 
-    // Save bookmarks to chrome.storage.local
+    //------------------------------------------------------------------------------------------------------
+    // 현재 메모리의 북마크 배열을 chrome.storage.local에 영구 저장한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function saveBookmarks() {
         if (!chrome.runtime?.id) return;
         chrome.storage.local.set({ bookmarks: bookmarks });
     }
 
-    // Load configuration from chrome.storage
+    //------------------------------------------------------------------------------------------------------
+    // chrome.storage.sync에서 사용자 설정(단축키, 바 개수, 색상, 무시구분자 등)을 불러온다.
+    // 입력: callback - 설정 로드 완료 후 실행할 콜백 함수
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function loadConfig(callback) {
         if (!chrome.runtime?.id) {
             if (callback) callback();
@@ -144,25 +164,37 @@
                 if (callback) callback();
                 return;
             }
+            // 단축키 설정 적용
             if (result.shortcut) config.shortcut = result.shortcut;
+
+            // 1번 검색바 일반 하이라이트 색상 설정 적용
             if (result.highlightColor) {
                 config.highlightColor = result.highlightColor;
                 COLOR_PALETTES[0].highlight = result.highlightColor;
                 COLOR_PALETTES[0].badge = result.highlightColor;
             }
+
+            // 1번 검색바 활성 하이라이트 색상 설정 적용
             if (result.activeHighlightColor) {
                 config.activeHighlightColor = result.activeHighlightColor;
                 COLOR_PALETTES[0].active = result.activeHighlightColor;
             }
+
+            // 기타 사용자 옵션(자동 이동, 검색바 개수, 무시구분자) 동기화
             if (typeof result.autoMove === 'boolean') config.autoMove = result.autoMove;
             if (typeof result.defaultBarCount === 'number') config.defaultBarCount = result.defaultBarCount;
             if (Array.isArray(result.lastBarsState)) config.lastBarsState = result.lastBarsState;
             if (typeof result.ignoreDelimiters === 'string') config.ignoreDelimiters = result.ignoreDelimiters;
+
             if (callback) callback();
         });
     }
 
-    // Save current bars state to storage
+    //------------------------------------------------------------------------------------------------------
+    // 현재 열려있는 검색바들의 상태(옵션값, 검색어 등)를 저장하여 재실행 시 복원할 수 있도록 한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function saveBarsState() {
         if (!chrome.runtime?.id) return;
         if (bars.length === 0) return;
@@ -176,8 +208,27 @@
         chrome.storage.sync.set({ lastBarsState: state });
     }
 
-    // Listen for storage changes
+    // Chrome Storage 쓰기 한도 쿼터(분당 120회)를 보호하기 위한 저장 디바운스 함수
+    let saveBarsStateTimer = null;
+    function debouncedSaveBarsState(delay = 400) {
+        if (saveBarsStateTimer) clearTimeout(saveBarsStateTimer);
+        saveBarsStateTimer = setTimeout(() => {
+            saveBarsState();
+        }, delay);
+    }
+
+    // 빠른 타이핑 시 불필요한 전체 DOM 재탐색을 방지하는 검색 디바운스 함수 (80ms)
+    let searchDebounceTimer = null;
+    function debouncedPerformAllSearches(bar, delay = 80) {
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            performAllSearches(bar);
+        }, delay);
+    }
+
+    // 다른 탭이나 팝업에서 변경된 스토리지 이벤트를 실시간 감지하여 반영
     chrome.storage.onChanged.addListener((changes, areaName) => {
+        // 북마크 변경(로컬 스토리지) 실시간 동기화
         if (areaName === 'local') {
             if (changes.bookmarks) {
                 bookmarks = changes.bookmarks.newValue || [];
@@ -187,6 +238,8 @@
             }
             return;
         }
+
+        // 공통 환경설정(싱크 스토리지) 동기화
         if (areaName !== 'sync') return;
         if (changes.shortcut) config.shortcut = changes.shortcut.newValue;
         if (changes.highlightColor) {
@@ -206,21 +259,31 @@
         if (changes.ignoreDelimiters) config.ignoreDelimiters = changes.ignoreDelimiters.newValue;
     });
 
-    // Create Base UI Container in Shadow DOM
+// ## 단계 300: Shadow DOM 기반 검색 UI 루트 컨테이너 및 공통 바 생성
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 웹 페이지 고유 CSS와 격리된 Shadow DOM 루트와 상단 공통 바 및 검색바 컨테이너를 생성한다.
+    // 기존에 루트 요소가 DOM에서 분리되었을 경우 재부착 처리를 함께 수행한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function createUI() {
+        // 이미 유효하게 DOM에 부착되어 있다면 재사용
         if (shadowRoot && hostElement && hostElement.isConnected) return;
 
+        // DOM에서 일시 분리된 경우 본문에 재연결
         if (hostElement && !hostElement.isConnected) {
             (document.body || document.documentElement).appendChild(hostElement);
             return;
         }
 
-        // Remove any old orphaned root element if present
+        // 기존 고아 루트 요소가 존재하면 정리
         const oldRoot = document.getElementById('chrome-ext-search-root');
         if (oldRoot) {
             oldRoot.remove();
         }
 
+        // 최상위 호스트 컨테이너 엘리먼트 생성 및 고정 위치 지정
         hostElement = document.createElement('div');
         hostElement.id = 'chrome-ext-search-root';
         hostElement.style.setProperty('position', 'fixed', 'important');
@@ -233,6 +296,7 @@
         hostElement.style.setProperty('transform', 'none', 'important');
         hostElement.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
+        // 캡슐화된 Shadow DOM 트리 생성
         shadowRoot = hostElement.attachShadow({ mode: 'open' });
 
         const style = document.createElement('style');
@@ -728,20 +792,31 @@
         (document.body || document.documentElement).appendChild(hostElement);
     }
 
-    // Create a new Search Bar instance
+// ## 단계 400: 개별 검색바 인스턴스 생성, 관리 및 이벤트 바인딩
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 검색바 인스턴스 요소를 생성하고 옵션 체크박스 및 내비게이션 이벤트를 바인딩한다.
+    // 생성된 검색바는 bars 배열에 추가되고 활성 바(activeBar)로 지정된다.
+    // 입력: initData - 초기 검색어 및 옵션 { query, caseSensitive, wholeWord, useRegex }
+    //       focusInput - 생성 직후 검색창 인풋 포커스 여부 (boolean)
+    // 출력: 생성된 bar 인스턴스 객체
+    //------------------------------------------------------------------------------------------------------
     function createSearchBar(initData = {}, focusInput = true) {
         createUI();
 
+        // 초기화 데이터 및 검색 옵션 파싱
         const opts = (typeof initData === 'string') ? { query: initData } : (initData || {});
         const initialQuery = opts.query || '';
         const initialCase = !!opts.caseSensitive;
         const initialWord = !!opts.wholeWord;
         const initialRegex = !!opts.useRegex;
 
+        // 색상 팔레트 및 고유 ID 할당
         const barIndex = bars.length;
         const palette = COLOR_PALETTES[barIndex % COLOR_PALETTES.length];
         const barId = nextBarId++;
 
+        // 검색바 행(row) DOM 생성
         const row = document.createElement('div');
         row.className = 'search-bar';
         row.dataset.barId = String(barId);
@@ -789,6 +864,7 @@
 
         barsContainer.appendChild(row);
 
+        // 검색바 인스턴스 데이터 구조 및 UI 엘리먼트 캐싱
         const bar = {
             id: barId,
             rowEl: row,
@@ -818,7 +894,7 @@
             }
         };
 
-        // Apply initial checkbox states
+        // 초기 옵션 체크박스 상태 반영
         bar.ui.chkCase.checked = initialCase;
         bar.ui.labelCase.classList.toggle('active', initialCase);
 
@@ -833,19 +909,22 @@
             bar.ui.btnClear.classList.add('visible');
         }
 
-        // Attach event listeners for this bar
+        // 검색바 인풋 포커스 시 활성 바로 설정
         bar.ui.input.addEventListener('focus', () => {
             setActiveBar(bar);
         });
 
+        // 입력값 변경 시 실시간 증분 검색 트리거 (디바운스로 고속 타이핑 렉 및 스토리지 쿼터 초과 방지)
         bar.ui.input.addEventListener('input', (e) => {
             bar.query = e.target.value;
             bar.ui.btnClear.classList.toggle('visible', !!bar.query);
-            performAllSearches(bar);
-            saveBarsState();
+            debouncedPerformAllSearches(bar, 80);
+            debouncedSaveBarsState(400);
         });
 
+        // 지우기(✕) 버튼 클릭 시 입력값 즉시 초기화
         bar.ui.btnClear.addEventListener('click', () => {
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             bar.query = '';
             bar.ui.input.value = '';
             bar.ui.btnClear.classList.remove('visible');
@@ -854,33 +933,33 @@
             saveBarsState();
         });
 
+        // 인풋 내 키보드 내비게이션(Enter, Shift+Enter, ESC, F3, F4)
         bar.ui.input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (e.shiftKey) {
-                    moveToPrev(bar);
-                } else {
-                    moveToNext(bar);
+                // 엔터 입력 시 대기 중인 디바운스 즉시 실행 보장
+                if (searchDebounceTimer) {
+                    clearTimeout(searchDebounceTimer);
+                    performAllSearches(bar);
                 }
+                e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
             } else if (e.key === 'Escape') {
                 e.preventDefault();
                 removeSearchBar(bar);
             } else if (e.key === 'F3') {
                 e.preventDefault();
-                if (e.shiftKey) {
-                    moveToPrev(bar);
-                } else {
-                    moveToNext(bar);
-                }
+                e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
             } else if (e.key === 'F4') {
                 e.preventDefault();
                 moveToPrev(bar);
             }
         });
 
+        // 이전/다음 화살표 클릭 핸들러
         bar.ui.btnNext.addEventListener('click', () => moveToNext(bar));
         bar.ui.btnPrev.addEventListener('click', () => moveToPrev(bar));
 
+        // 대소문자 구분(MatchCase) 토글
         bar.ui.chkCase.addEventListener('change', (e) => {
             bar.caseSensitive = e.target.checked;
             bar.ui.labelCase.classList.toggle('active', bar.caseSensitive);
@@ -888,6 +967,7 @@
             saveBarsState();
         });
 
+        // 단어 단위(ByWord) 토글
         bar.ui.chkWord.addEventListener('change', (e) => {
             bar.wholeWord = e.target.checked;
             bar.ui.labelWord.classList.toggle('active', bar.wholeWord);
@@ -895,6 +975,7 @@
             saveBarsState();
         });
 
+        // 정규식(RegExp) 토글
         bar.ui.chkRegex.addEventListener('change', (e) => {
             bar.useRegex = e.target.checked;
             bar.ui.labelRegex.classList.toggle('active', bar.useRegex);
@@ -902,6 +983,7 @@
             saveBarsState();
         });
 
+        // 새 검색바 추가(+) 및 검색바 닫기(✕)
         bar.ui.btnAdd.addEventListener('click', () => {
             createSearchBar({}, true);
             saveBarsState();
@@ -911,12 +993,14 @@
             removeSearchBar(bar);
         });
 
+        // 북마크 핀 버튼 클릭 핸들러
         if (bar.ui.btnBookmark) {
             bar.ui.btnBookmark.addEventListener('click', () => {
                 addBookmark(bar);
             });
         }
 
+        // 인스턴스 배열 등록 및 활성화
         bars.push(bar);
         setActiveBar(bar);
 
@@ -932,7 +1016,11 @@
         return bar;
     }
 
-    // Set currently active bar for keyboard navigation
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 검색바를 현재 활성 검색바(activeBar)로 설정하고 테두리 스타일을 업데이트한다.
+    // 입력: bar - 활성화할 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function setActiveBar(bar) {
         activeBar = bar;
         bars.forEach(b => {
@@ -940,8 +1028,13 @@
         });
     }
 
-    // Remove a single Search Bar
+    //------------------------------------------------------------------------------------------------------
+    // 단일 검색바 인스턴스를 닫고 DOM 및 배열에서 제거한다. 마지막 바일 경우 전체를 숨긴다.
+    // 입력: bar - 제거할 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function removeSearchBar(bar) {
+        // 검색바가 1개만 남은 상태에서 닫으면 전체 검색 오버레이 숨김
         if (bars.length <= 1) {
             hideAllSearchBars();
             return;
@@ -953,7 +1046,7 @@
             bar.rowEl.remove();
         }
 
-        // Reassign active bar if needed
+        // 닫힌 바가 활성 상태였으면 인접한 다른 바에 포커스 승계
         if (activeBar === bar) {
             const nextActive = bars[Math.max(0, index - 1)] || bars[0];
             if (nextActive) {
@@ -962,11 +1055,19 @@
             }
         }
 
+        // 나머지 검색바 하이라이트 재계산 및 상태 저장
         performAllSearches();
         saveBarsState();
     }
 
-    // Add current page and search keyword to bookmarks
+// ## 단계 500: 페이지 및 검색 키워드 북마크 관리 모듈
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 현재 활성 페이지 URL과 해당 검색바의 입력 검색어를 북마크 목록에 추가한다.
+    // 추가 시 16가지 고유 색상 중 랜덤 색상을 부여하고 스토리지에 동기화한다.
+    // 입력: bar - 북마크를 생성한 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function addBookmark(bar) {
         const keyword = (bar && bar.ui.input.value) ? bar.ui.input.value.trim() : '';
         const currentUrl = window.location.href;
@@ -983,24 +1084,33 @@
         renderBookmarks();
     }
 
-    // Delete a bookmark by ID
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 고유 ID의 북마크를 목록에서 삭제하고 뷰를 갱신한다.
+    // 입력: bookmarkId - 삭제할 북마크의 고유 ID 문자열
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function deleteBookmark(bookmarkId) {
         bookmarks = bookmarks.filter(b => b.id !== bookmarkId);
         saveBookmarks();
         renderBookmarks();
     }
 
-    // Open bookmarked page and auto-populate search keyword
+    //------------------------------------------------------------------------------------------------------
+    // 북마크 클릭 시 해당 URL로 이동하거나 현재 페이지인 경우 검색창에 키워드를 즉시 주입한다.
+    // 페이지 이동이 필요한 경우 세션 스토리지에 키워드를 임시 저장하여 새 페이지 로드 시 복원한다.
+    // 입력: bookmark - 열고자 하는 북마크 객체 { url, keyword, color }
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function openBookmark(bookmark) {
         if (!bookmark) return;
 
-        // Save pending search query to session storage so new page or current page can consume it
+        // 다른 페이지 이동 후 자동 복원할 수 있도록 세션 스토리지에 키워드 기록
         try {
             sessionStorage.setItem('search_ext_pending_query', bookmark.keyword || '');
         } catch (e) {}
 
         const currentUrl = window.location.href;
-        // Compare URLs ignoring hash or search if identical
+        // 동일 페이지인 경우 페이지 이동 없이 검색창에 즉시 반영
         if (currentUrl === bookmark.url) {
             applyPendingBookmarkQuery(bookmark.keyword || '');
         } else {
@@ -1008,7 +1118,11 @@
         }
     }
 
-    // Apply pending query to the first search bar and trigger search
+    //------------------------------------------------------------------------------------------------------
+    // 북마크에 저장된 검색 키워드를 1번 검색바에 주입하고 자동 검색을 실행한다.
+    // 입력: keyword - 검색창에 입력할 문자열
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function applyPendingBookmarkQuery(keyword) {
         showSearchBar();
         if (bars.length > 0) {
@@ -1024,221 +1138,12 @@
         }
     }
 
-    // Get current text selection, or initialize selection from the active search match
-    function getOrInitSelection() {
-        const sel = window.getSelection();
-        if (!sel) return null;
-
-        if (sel.rangeCount > 0 && !sel.isCollapsed && sel.toString().length > 0) {
-            return sel;
-        }
-
-        // If no user selection exists, select the current active match element
-        const target = activeBar || bars[0];
-        if (target && target.matches && target.matches.length > 0 && target.currentIndex >= 0) {
-            const activeEl = target.matches[target.currentIndex];
-            if (activeEl && activeEl.isConnected) {
-                const range = document.createRange();
-                range.selectNodeContents(activeEl);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                return sel;
-            }
-        }
-
-        return (sel.rangeCount > 0 && !sel.isCollapsed) ? sel : null;
-    }
-
-    // Helper: Check if character is an ignored delimiter
-    function isIgnoredDelimiter(char) {
-        if (!char || typeof config.ignoreDelimiters !== 'string') return false;
-        return config.ignoreDelimiters.includes(char);
-    }
-
-    // Expand current selection to the left by words (default: 1)
-    function expandSelectionLeft(wordCount = 1) {
-        const sel = getOrInitSelection();
-        if (!sel || sel.rangeCount === 0) return;
-
-        const range = sel.getRangeAt(0);
-        let startNode = range.startContainer;
-        let startOffset = range.startOffset;
-        const fixedEndNode = range.endContainer;
-        const fixedEndOffset = range.endOffset;
-
-        // Anchor at fixed end, focus at moving start
-        sel.setBaseAndExtent(fixedEndNode, fixedEndOffset, startNode, startOffset);
-
-        for (let step = 0; step < wordCount; step++) {
-            let lastLen = sel.toString().length;
-            sel.modify('extend', 'backward', 'word');
-            if (sel.toString().length === lastLen) {
-                sel.modify('extend', 'backward', 'word');
-            }
-            if (sel.toString().length === lastLen) {
-                break; // Cannot expand further
-            }
-
-            // If ignoreDelimiters are configured, bridge across them
-            if (config.ignoreDelimiters) {
-                let loopCount = 0;
-                while (loopCount++ < 15) {
-                    const currentText = sel.toString();
-                    if (!currentText) break;
-
-                    // 1) If current selection starts with an ignored delimiter, expand backward further
-                    if (isIgnoredDelimiter(currentText[0])) {
-                        const lenBefore = currentText.length;
-                        sel.modify('extend', 'backward', 'word');
-                        if (sel.toString().length > lenBefore) continue;
-                    }
-
-                    // 2) Peek at the preceding character
-                    const currentRange = sel.getRangeAt(0).cloneRange();
-                    const lenBeforePeek = currentText.length;
-                    sel.modify('extend', 'backward', 'character');
-                    const textWithPeek = sel.toString();
-
-                    if (textWithPeek.length > lenBeforePeek) {
-                        const prevChar = textWithPeek[0];
-                        if (isIgnoredDelimiter(prevChar)) {
-                            // Preceding char is an ignored delimiter: bridge across it
-                            sel.modify('extend', 'backward', 'word');
-                            continue;
-                        } else {
-                            // Restore back to currentRange (revert 1 character extension)
-                            sel.setBaseAndExtent(
-                                fixedEndNode,
-                                fixedEndOffset,
-                                currentRange.startContainer,
-                                currentRange.startOffset
-                            );
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Expand current selection to the right by words (default: 1)
-    function expandSelectionRight(wordCount = 1) {
-        const sel = getOrInitSelection();
-        if (!sel || sel.rangeCount === 0) return;
-
-        const range = sel.getRangeAt(0);
-        const fixedStartNode = range.startContainer;
-        const fixedStartOffset = range.startOffset;
-        let endNode = range.endContainer;
-        let endOffset = range.endOffset;
-
-        // Anchor at fixed start, focus at moving end
-        sel.setBaseAndExtent(fixedStartNode, fixedStartOffset, endNode, endOffset);
-
-        for (let step = 0; step < wordCount; step++) {
-            let lastLen = sel.toString().length;
-            sel.modify('extend', 'forward', 'word');
-            if (sel.toString().length === lastLen) {
-                sel.modify('extend', 'forward', 'word');
-            }
-            if (sel.toString().length === lastLen) {
-                break; // Cannot expand further
-            }
-
-            // If ignoreDelimiters are configured, bridge across them
-            if (config.ignoreDelimiters) {
-                let loopCount = 0;
-                while (loopCount++ < 15) {
-                    const currentText = sel.toString();
-                    if (!currentText) break;
-
-                    // 1) If current selection ends with an ignored delimiter, expand forward further
-                    if (isIgnoredDelimiter(currentText[currentText.length - 1])) {
-                        const lenBefore = currentText.length;
-                        sel.modify('extend', 'forward', 'word');
-                        if (sel.toString().length > lenBefore) continue;
-                    }
-
-                    // 2) Peek at the succeeding character
-                    const currentRange = sel.getRangeAt(0).cloneRange();
-                    const lenBeforePeek = currentText.length;
-                    sel.modify('extend', 'forward', 'character');
-                    const textWithPeek = sel.toString();
-
-                    if (textWithPeek.length > lenBeforePeek) {
-                        const nextChar = textWithPeek[textWithPeek.length - 1];
-                        if (isIgnoredDelimiter(nextChar)) {
-                            // Next char is an ignored delimiter: bridge across it
-                            sel.modify('extend', 'forward', 'word');
-                            continue;
-                        } else {
-                            // Restore back to currentRange (revert 1 character extension)
-                            sel.setBaseAndExtent(
-                                fixedStartNode,
-                                fixedStartOffset,
-                                currentRange.endContainer,
-                                currentRange.endOffset
-                            );
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Copy selected text to clipboard and provide visual feedback
-    async function handleTextSelectAction(btnEl) {
-        const sel = getOrInitSelection();
-        let textToCopy = (sel && !sel.isCollapsed) ? sel.toString() : '';
-
-        if (!textToCopy) {
-            const target = activeBar || bars[0];
-            if (target && target.query) {
-                textToCopy = target.query;
-            }
-        }
-
-        if (!textToCopy) return;
-
-        let copied = false;
-        try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(textToCopy);
-                copied = true;
-            }
-        } catch (e) {}
-
-        if (!copied) {
-            try {
-                const ta = document.createElement('textarea');
-                ta.value = textToCopy;
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                ta.style.pointerEvents = 'none';
-                document.body.appendChild(ta);
-                ta.select();
-                copied = document.execCommand('copy');
-                document.body.removeChild(ta);
-            } catch (e) {}
-        }
-
-        if (btnEl && copied) {
-            const originalText = btnEl.textContent;
-            btnEl.textContent = 'Copied!';
-            btnEl.style.color = '#4ade80';
-            setTimeout(() => {
-                btnEl.textContent = originalText;
-                btnEl.style.color = '';
-            }, 1000);
-        }
-    }
-
-    // Render bookmark clips in common bar (right to left)
+    //------------------------------------------------------------------------------------------------------
+    // 상단 공통 바 우측에 저장된 북마크 핀 클립들을 역순(오른쪽부터 왼쪽으로)으로 렌더링한다.
+    // 각 클립은 지정 색상 푸시핀 아이콘 및 하단 ✕ 삭제 버튼으로 구성된다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function renderBookmarks() {
         if (!bookmarksContainer) return;
         bookmarksContainer.innerHTML = '';
@@ -1247,11 +1152,12 @@
             return;
         }
 
-        // Render bookmarks (bookmarks-bar uses flex-direction: row-reverse, so appending order naturally places newest on the right)
+        // flex-direction: row-reverse 적용으로 순서대로 추가하면 최신 북마크가 오른쪽에 배치됨
         bookmarks.forEach(bm => {
             const clipItem = document.createElement('div');
             clipItem.className = 'bookmark-clip-item';
 
+            // 핀 아이콘 버튼 생성
             const pinBtn = document.createElement('button');
             pinBtn.type = 'button';
             pinBtn.className = 'btn-pin-clip';
@@ -1265,6 +1171,7 @@
                 openBookmark(bm);
             });
 
+            // ✕ 삭제 버튼 생성
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'btn-clip-delete';
@@ -1281,21 +1188,216 @@
         });
     }
 
-    // Show search bar container
+// ## 단계 600: 텍스트 선택(Selection) 확장 및 클립보드 복사 모듈
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 현재 웹페이지의 텍스트 선택 영역을 반환하거나, 없을 경우 활성 검색어 일치 위치를 기본 선택한다.
+    // 입력: 없음
+    // 출력: Selection 객체 또는 null
+    //------------------------------------------------------------------------------------------------------
+    function getOrInitSelection() {
+        const sel = window.getSelection();
+        if (!sel) return null;
+
+        // 이미 사용자가 텍스트를 드래그 선택 중인 경우 그대로 반환
+        if (sel.rangeCount > 0 && !sel.isCollapsed && sel.toString().length > 0) {
+            return sel;
+        }
+
+        // 선택 영역이 없다면 현재 검색 일치 항목 엘리먼트를 선택 영역으로 초기화
+        const target = activeBar || bars[0];
+        if (target && target.matches && target.matches.length > 0 && target.currentIndex >= 0) {
+            const activeEl = target.matches[target.currentIndex];
+            if (activeEl && activeEl.isConnected) {
+                const range = document.createRange();
+                range.selectNodeContents(activeEl);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                return sel;
+            }
+        }
+
+        return (sel.rangeCount > 0 && !sel.isCollapsed) ? sel : null;
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 문자가 사용자가 옵션에서 설정한 '선택기능 무시구분자'에 포함되는지 확인한다.
+    // 입력: char - 검사할 단일 문자
+    // 출력: true(무시할 구분자) 또는 false
+    //------------------------------------------------------------------------------------------------------
+    function isIgnoredDelimiter(char) {
+        if (!char || typeof config.ignoreDelimiters !== 'string') return false;
+        return config.ignoreDelimiters.includes(char);
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 텍스트 선택 영역을 지정 방향('backward' 또는 'forward')으로 지정 단어 수만큼 확장한다.
+    // 무시 구분자(예: '-')가 연결되어 있는 경우 끊기지 않고 1단어로 묶어 확장한다.
+    // 입력: direction - 'backward'(왼쪽) 또는 'forward'(오른쪽)
+    //       wordCount - 확장할 단어 개수 (기본값: 1)
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function expandSelection(direction, wordCount = 1) {
+        const sel = getOrInitSelection();
+        if (!sel || sel.rangeCount === 0) return;
+
+        const isBack = (direction === 'backward');
+        const range = sel.getRangeAt(0);
+
+        // backward 확장 시 end 고정/start 이동, forward 확장 시 start 고정/end 이동
+        const fixedNode = isBack ? range.endContainer : range.startContainer;
+        const fixedOffset = isBack ? range.endOffset : range.startOffset;
+        const movingNode = isBack ? range.startContainer : range.endContainer;
+        const movingOffset = isBack ? range.startOffset : range.endOffset;
+
+        sel.setBaseAndExtent(fixedNode, fixedOffset, movingNode, movingOffset);
+
+        for (let step = 0; step < wordCount; step++) {
+            let lastLen = sel.toString().length;
+            sel.modify('extend', direction, 'word');
+
+            // 공백에서 정지된 경우 한 번 더 전진
+            if (sel.toString().length === lastLen) {
+                sel.modify('extend', direction, 'word');
+            }
+            if (sel.toString().length === lastLen) {
+                break;
+            }
+
+            // 무시구분자(예: '-') 연결 처리 (루프 제한 15회로 안전성 보장)
+            if (config.ignoreDelimiters) {
+                let loopCount = 0;
+                while (loopCount++ < 15) {
+                    const currentText = sel.toString();
+                    if (!currentText) break;
+
+                    const boundaryChar = isBack ? currentText[0] : currentText[currentText.length - 1];
+
+                    // 현재 선택 가장자리가 무시구분자이면 추가 단어 확장
+                    if (isIgnoredDelimiter(boundaryChar)) {
+                        const lenBefore = currentText.length;
+                        sel.modify('extend', direction, 'word');
+                        if (sel.toString().length > lenBefore) continue;
+                    }
+
+                    // 다음 인접 문자 1글자를 미리 확장하여 검사
+                    const currentRange = sel.getRangeAt(0).cloneRange();
+                    const lenBeforePeek = currentText.length;
+                    sel.modify('extend', direction, 'character');
+                    const textWithPeek = sel.toString();
+
+                    if (textWithPeek.length > lenBeforePeek) {
+                        const peekChar = isBack ? textWithPeek[0] : textWithPeek[textWithPeek.length - 1];
+                        if (isIgnoredDelimiter(peekChar)) {
+                            // 인접 문자가 무시구분자이면 건너뛰어 계속 확장
+                            sel.modify('extend', direction, 'word');
+                            continue;
+                        } else {
+                            // 일반 문자이면 1글자 peek 취소하고 원래 범위로 복원
+                            const revertNode = isBack ? currentRange.startContainer : currentRange.endContainer;
+                            const revertOffset = isBack ? currentRange.startOffset : currentRange.endOffset;
+                            sel.setBaseAndExtent(fixedNode, fixedOffset, revertNode, revertOffset);
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 왼쪽(backward) 단어 단위 확장 래퍼 함수
+    function expandSelectionLeft(wordCount = 1) {
+        expandSelection('backward', wordCount);
+    }
+
+    // 오른쪽(forward) 단어 단위 확장 래퍼 함수
+    function expandSelectionRight(wordCount = 1) {
+        expandSelection('forward', wordCount);
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 현재 선택된 텍스트(또는 활성 검색어)를 클립보드로 복사하고 버튼에 시각적 피드백을 제공한다.
+    // 입력: btnEl - 클릭된 'text select' 버튼 엘리먼트
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    async function handleTextSelectAction(btnEl) {
+        const sel = getOrInitSelection();
+        let textToCopy = (sel && !sel.isCollapsed) ? sel.toString() : '';
+
+        // 브라우저 텍스트 선택이 없으면 현재 활성 검색바의 검색어 사용
+        if (!textToCopy) {
+            const target = activeBar || bars[0];
+            if (target && target.query) {
+                textToCopy = target.query;
+            }
+        }
+
+        if (!textToCopy) return;
+
+        // 클립보드 API 비동기 복사 시도
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(textToCopy);
+                copied = true;
+            }
+        } catch (e) {}
+
+        // 실패 시 document.execCommand 폴백 실행
+        if (!copied) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = textToCopy;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                ta.style.pointerEvents = 'none';
+                document.body.appendChild(ta);
+                ta.select();
+                copied = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (e) {}
+        }
+
+        // 복사 성공 시 버튼 텍스트 피드백 표시 (1초간 초록색 Copied!)
+        if (btnEl && copied) {
+            const originalText = btnEl.textContent;
+            btnEl.textContent = 'Copied!';
+            btnEl.style.color = '#4ade80';
+            setTimeout(() => {
+                btnEl.textContent = originalText;
+                btnEl.style.color = '';
+            }, 1000);
+        }
+    }
+
+// ## 단계 700: 검색창 노출, 숨김 및 하이라이트 정리
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 검색창 오버레이 컨테이너를 화면에 표시하고 이전 검색바 상태 또는 기본 검색바를 생성한다.
+    // 마우스 드래그 선택 텍스트가 있을 경우 첫 번째 검색창에 자동 입력된다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function showSearchBar() {
         createUI();
         isBarVisible = true;
         hostElement.style.setProperty('display', 'block', 'important');
 
+        // 페이지 내 드래그된 텍스트가 있으면 초기 검색어로 활용
         const selectedText = window.getSelection()?.toString().trim();
         const initialQuery = (selectedText && selectedText.length < 100) ? selectedText : '';
 
+        // 검색바 인스턴스 생성 및 복원 헬퍼
         const setupBars = () => {
             if (bars.length === 0) {
                 let statesToRestore = [];
+                // 이전 세션에서 저장된 검색바가 있으면 그대로 복원
                 if (Array.isArray(config.lastBarsState) && config.lastBarsState.length > 0) {
                     statesToRestore = config.lastBarsState;
                 } else {
+                    // 없을 경우 기본 설정된 검색바 개수(기본값: 2)만큼 빈 바 생성
                     const count = Math.max(1, config.defaultBarCount || 2);
                     for (let i = 0; i < count; i++) {
                         statesToRestore.push({
@@ -1307,6 +1409,7 @@
                     }
                 }
 
+                // 각 검색바 인스턴스 복원 및 생성
                 statesToRestore.forEach((state, idx) => {
                     const isFirst = (idx === 0);
                     const bar = createSearchBar(state, isFirst);
@@ -1317,6 +1420,7 @@
                     }
                 });
 
+                // 첫 번째 검색바를 활성화하고 텍스트 전체 선택
                 const firstBar = bars[0];
                 if (firstBar) {
                     setActiveBar(firstBar);
@@ -1326,6 +1430,7 @@
 
                 performAllSearches();
             } else {
+                // 이미 검색바가 열려있다면 활성 바에 포커스
                 const targetBar = activeBar || bars[0];
                 setActiveBar(targetBar);
                 if (initialQuery) {
@@ -1339,25 +1444,35 @@
             }
         };
 
+        // 설정 로드 완료 상태에 따라 즉시 또는 콜백 실행
         if (config._loaded) {
             setupBars();
         } else {
             loadConfig(() => setupBars());
         }
 
+        // 최신 북마크 목록 렌더링
         loadBookmarks(() => {
             renderBookmarks();
         });
     }
 
-    // Hide search bar container & clean all highlights
+    //------------------------------------------------------------------------------------------------------
+    // 검색창 오버레이를 화면에서 숨기고 모든 본문 하이라이트와 검색바 요소를 정리한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function hideAllSearchBars() {
         if (!isBarVisible) return;
         saveBarsState();
         isBarVisible = false;
+
+        // 컨테이너 숨김 처리
         if (hostElement) {
             hostElement.style.setProperty('display', 'none', 'important');
         }
+
+        // 본문 내 모든 하이라이트 태그 제거 및 상태 초기화
         cleanAllHighlights();
         bars.forEach(b => {
             b.rowEl.remove();
@@ -1366,19 +1481,37 @@
         activeBar = null;
     }
 
-    // Clean all highlights from the document
+    //------------------------------------------------------------------------------------------------------
+    // 본문 전체에 삽입된 모든 <mark> 하이라이트 요소를 원본 텍스트 노드로 언랩 복원한다.
+    // 성능 최적화: mark별 개별 normalize 호출 대신 부모 노드들을 Set에 모아 한 번씩만 normalize()를 수행한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function cleanAllHighlights() {
         const marks = document.querySelectorAll('mark.search-ext-highlight');
+        if (marks.length === 0) return;
+
+        const parentsToNormalize = new Set();
         marks.forEach(mark => {
             const parent = mark.parentNode;
             if (parent) {
+                // mark 자식 노드들을 상위로 끌어올린 후 mark 태그 삭제
                 while (mark.firstChild) {
                     parent.insertBefore(mark.firstChild, mark);
                 }
                 parent.removeChild(mark);
-                parent.normalize();
+                parentsToNormalize.add(parent);
             }
         });
+
+        // 수집된 부모 노드들에 대해 중복 없이 1회씩만 텍스트 노드 병합 수행
+        parentsToNormalize.forEach(p => {
+            if (p.isConnected) {
+                p.normalize();
+            }
+        });
+
+        // 각 검색바의 일치 항목 배열 및 카운트 디스플레이 초기화
         bars.forEach(bar => {
             bar.matches = [];
             bar.currentIndex = -1;
@@ -1386,12 +1519,23 @@
         });
     }
 
-    // Helper: Escape Regex
+// ## 단계 800: 다중 검색바 정규식 컴파일 및 실시간 텍스트 하이라이트 엔진
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 문자열 내 특수 기호를 안전하게 이스케이프하여 정규식 리터럴 패턴으로 만든다.
+    // 입력: string - 원본 텍스트
+    // 출력: 이스케이프된 정규식 패턴 문자열
+    //------------------------------------------------------------------------------------------------------
     function escapeRegExp(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    // Compile regex for a specific bar
+    //------------------------------------------------------------------------------------------------------
+    // 특정 검색바의 쿼리와 일치 옵션(대소문자, 단어단위, 정규식)을 조합하여 RegExp 객체를 생성한다.
+    // 정규식 오류가 발생할 경우 입력창에 invalid 에러 스타일을 부여한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    // 출력: 유효한 RegExp 인스턴스 또는 null
+    //------------------------------------------------------------------------------------------------------
     function compileBarRegex(bar) {
         bar.ui.inputBox.classList.remove('invalid');
         const raw = bar.useRegex ? bar.query : bar.query.trim();
@@ -1414,6 +1558,7 @@
         try {
             return new RegExp(pattern, flags);
         } catch (e) {
+            // 잘못된 정규식 패턴 입력 시 붉은 테두리 표시
             if (bar.useRegex) {
                 bar.ui.inputBox.classList.add('invalid');
             }
@@ -1421,18 +1566,36 @@
         }
     }
 
-    // Multi-bar synchronized text search and highlighting
+    // 검색바당 최대 렌더링 가능한 하이라이트 노드 상한선 (브라우저 메모리 고갈 및 탭 프리징 방지)
+    const MAX_MATCHES_PER_BAR = 1500;
+
+    //------------------------------------------------------------------------------------------------------
+    // 모든 검색바의 패턴을 본문 전체에서 동시에 탐색하여 겹침 없이 하이라이트 요소를 생성한다.
+    // 성능 최적화:
+    // 1) 일반 문자열 검색 시 정규식 대신 C++ 기반의 indexOf/includes 사전 검사로 비매칭 노드 고속 통과
+    // 2) TreeWalker 제외 태그에 SVG, CANVAS, AUDIO, VIDEO, TEMPLATE 추가
+    // 3) mark 스타일 적용 시 cssText 1회 일괄 할당
+    // 4) MAX_MATCHES_PER_BAR 상한선 보호로 대량 매칭 시에도 브라우저 반응성 유지
+    // 입력: triggeringBar - 사용자 입력이 발생한 검색바 (자동 스크롤 대상)
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function performAllSearches(triggeringBar = null) {
         cleanAllHighlights();
 
-        // Compile regexes for all bars
+        // 유효한 검색 패턴이 있는 검색바들만 선별 및 사전 최적화 데이터 캐싱
         const activeSearchBars = [];
         bars.forEach(bar => {
+            const raw = bar.useRegex ? bar.query : bar.query.trim();
+            if (!raw) return;
             const regex = compileBarRegex(bar);
             if (regex) {
                 activeSearchBars.push({
                     bar: bar,
-                    regex: regex
+                    regex: regex,
+                    raw: raw,
+                    isSimpleText: !bar.useRegex && !bar.wholeWord,
+                    caseSensitive: bar.caseSensitive,
+                    lowerRaw: raw.toLowerCase()
                 });
             }
         });
@@ -1441,7 +1604,7 @@
             return;
         }
 
-        // TreeWalker to traverse text nodes
+        // 웹페이지 본문의 순수 텍스트 노드 순회용 TreeWalker 설정
         const walker = document.createTreeWalker(
             document.body,
             NodeFilter.SHOW_TEXT,
@@ -1451,6 +1614,7 @@
                     if (!parent) return NodeFilter.FILTER_REJECT;
 
                     const tag = parent.tagName;
+                    // 검색에서 제외할 특수 태그 및 확장 프로그램 자체 UI 필터링 (렌더링되지 않는 비텍스트 태그 추가)
                     if (
                         tag === 'SCRIPT' ||
                         tag === 'STYLE' ||
@@ -1460,6 +1624,11 @@
                         tag === 'IFRAME' ||
                         tag === 'OBJECT' ||
                         tag === 'SELECT' ||
+                        tag === 'SVG' ||
+                        tag === 'CANVAS' ||
+                        tag === 'AUDIO' ||
+                        tag === 'VIDEO' ||
+                        tag === 'TEMPLATE' ||
                         parent.id === 'chrome-ext-search-root' ||
                         parent.closest('#chrome-ext-search-root') ||
                         parent.isContentEditable
@@ -1473,17 +1642,28 @@
             }
         );
 
-        // Collect matching nodes
+        // 검색 패턴에 부합하는 대상 텍스트 노드 사전 수집 (일반 문자열은 indexOf로 고속 사전 필터링)
         const nodesToProcess = [];
         let currentNode = walker.nextNode();
         while (currentNode) {
             const val = currentNode.nodeValue;
             let matched = false;
             for (const item of activeSearchBars) {
-                item.regex.lastIndex = 0;
-                if (item.regex.test(val)) {
-                    matched = true;
-                    break;
+                if (item.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
+                if (item.isSimpleText) {
+                    const hasMatch = item.caseSensitive
+                        ? val.includes(item.raw)
+                        : val.toLowerCase().includes(item.lowerRaw);
+                    if (hasMatch) {
+                        matched = true;
+                        break;
+                    }
+                } else {
+                    item.regex.lastIndex = 0;
+                    if (item.regex.test(val)) {
+                        matched = true;
+                        break;
+                    }
                 }
             }
             if (matched) {
@@ -1492,13 +1672,14 @@
             currentNode = walker.nextNode();
         }
 
-        // Process and highlight each text node
+        // 각 텍스트 노드별 일치 구간 분할 및 <mark> 태그 교체
         nodesToProcess.forEach(textNode => {
             const text = textNode.nodeValue;
             const intervals = [];
 
-            // Find all match intervals from all search bars
+            // 각 검색바별 일치 구간 계산 (한도 초과된 바는 매칭 생성 제외)
             activeSearchBars.forEach(({ bar, regex }) => {
+                if (bar.matches.length >= MAX_MATCHES_PER_BAR) return;
                 regex.lastIndex = 0;
                 let match;
                 while ((match = regex.exec(text)) !== null) {
@@ -1519,10 +1700,10 @@
 
             if (intervals.length === 0) return;
 
-            // Sort intervals: earliest start first, then longest match
+            // 시작 위치 오름차순, 길이 내림차순 정렬
             intervals.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
 
-            // Remove overlapping intervals
+            // 중첩되는 구간 제거 (선착순 우선 처리)
             const nonOverlapping = [];
             let lastEnd = 0;
             for (const item of intervals) {
@@ -1532,21 +1713,22 @@
                 }
             }
 
-            // Build replacement fragment
+            // DocumentFragment를 이용해 노드 일괄 교체
             const frag = document.createDocumentFragment();
             let curIdx = 0;
 
             for (const item of nonOverlapping) {
+                // 매칭 이전 일반 텍스트 노드 추가
                 if (item.start > curIdx) {
                     frag.appendChild(document.createTextNode(text.substring(curIdx, item.start)));
                 }
 
+                // 하이라이트 mark 엘리먼트 생성 및 cssText 1회 일괄 할당
                 const mark = document.createElement('mark');
                 mark.className = 'search-ext-highlight';
                 mark.dataset.barId = String(item.bar.id);
                 mark.textContent = text.substring(item.start, item.end);
-                mark.style.backgroundColor = item.bar.colorConfig.highlight;
-                mark.style.color = item.bar.colorConfig.text;
+                mark.style.cssText = `background-color:${item.bar.colorConfig.highlight};color:${item.bar.colorConfig.text};`;
 
                 frag.appendChild(mark);
                 item.bar.matches.push(mark);
@@ -1554,6 +1736,7 @@
                 curIdx = item.end;
             }
 
+            // 마지막 잔여 텍스트 노드 추가
             if (curIdx < text.length) {
                 frag.appendChild(document.createTextNode(text.substring(curIdx)));
             }
@@ -1564,14 +1747,15 @@
             }
         });
 
-        // Update each search bar's index, display, and active highlight
+        // 각 검색바의 일치 건수 표시 및 첫 번째 일치 항목 활성화
         bars.forEach(bar => {
             const total = bar.matches.length;
             if (total > 0) {
                 if (bar.currentIndex < 0 || bar.currentIndex >= total) {
                     bar.currentIndex = 0;
                 }
-                updateCountDisplay(bar, bar.currentIndex + 1, total);
+                const totalDisplay = total >= MAX_MATCHES_PER_BAR ? `${MAX_MATCHES_PER_BAR}+` : total;
+                updateCountDisplay(bar, bar.currentIndex + 1, totalDisplay);
                 highlightActiveMatch(bar);
             } else {
                 bar.currentIndex = -1;
@@ -1579,27 +1763,39 @@
             }
         });
 
-        // Auto-move if triggered by user input
+        // 자동 이동(Auto-Move) 옵션 활성화 시 첫 일치 항목으로 화면 스크롤
         if (triggeringBar && config.autoMove && triggeringBar.matches.length > 0) {
             scrollToCurrentMatch(triggeringBar);
         }
     }
 
-    // Update count display for a specific bar
+    //------------------------------------------------------------------------------------------------------
+    // 검색바의 일치 건수 카운트 라벨(예: "1 of 10") 텍스트를 업데이트한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    //       current - 현재 인덱스 (1-based)
+    //       total - 전체 일치 개수
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function updateCountDisplay(bar, current, total) {
         if (!bar.ui.countInfo) return;
         bar.ui.countInfo.textContent = `${current} of ${total}`;
     }
 
-    // Highlight the active match for a specific bar
+    //------------------------------------------------------------------------------------------------------
+    // 현재 검색바에서 활성화된 일치 항목과 일반 일치 항목의 하이라이트 색상 및 아웃라인을 구분 적용한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function highlightActiveMatch(bar) {
         bar.matches.forEach((el, i) => {
             if (i === bar.currentIndex) {
+                // 현재 포커스된 일치 항목: 굵은 테두리와 활성 색상 적용
                 el.classList.add('search-ext-active');
                 el.style.backgroundColor = bar.colorConfig.active;
                 el.style.color = bar.colorConfig.activeText;
                 el.style.outline = `2px solid ${bar.colorConfig.activeOutline}`;
             } else {
+                // 일반 일치 항목: 기본 하이라이트 색상 적용
                 el.classList.remove('search-ext-active');
                 el.style.backgroundColor = bar.colorConfig.highlight;
                 el.style.color = bar.colorConfig.text;
@@ -1608,7 +1804,11 @@
         });
     }
 
-    // Scroll the active match of a specific bar into center view
+    //------------------------------------------------------------------------------------------------------
+    // 활성화된 일치 항목 엘리먼트를 화면 중앙으로 부드럽게 스크롤한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function scrollToCurrentMatch(bar) {
         if (bar.currentIndex < 0 || bar.currentIndex >= bar.matches.length) return;
         const target = bar.matches[bar.currentIndex];
@@ -1621,7 +1821,13 @@
         }
     }
 
-    // Navigate to next match for a specific bar
+// ## 단계 900: 키보드 내비게이션 및 전역 단축키 핸들러
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 검색바의 다음 일치 항목으로 순환 이동한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function moveToNext(bar) {
         const total = bar.matches.length;
         if (total === 0) return;
@@ -1632,7 +1838,11 @@
         scrollToCurrentMatch(bar);
     }
 
-    // Navigate to previous match for a specific bar
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 검색바의 이전 일치 항목으로 순환 이동한다.
+    // 입력: bar - 검색바 인스턴스 객체
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function moveToPrev(bar) {
         const total = bar.matches.length;
         if (total === 0) return;
@@ -1643,14 +1853,19 @@
         scrollToCurrentMatch(bar);
     }
 
-    // Check if keyboard event matches configured shortcut
+    //------------------------------------------------------------------------------------------------------
+    // 키보드 이벤트가 사용자가 등록한 단축키 설정과 일치하는지 판별한다 (한/영 키 및 물리 코드 호환).
+    // 입력: e - KeyboardEvent 객체
+    //       shortcut - 저장된 단축키 객체 { ctrl, alt, shift, meta, key }
+    // 출력: true(단축키 일치) 또는 false
+    //------------------------------------------------------------------------------------------------------
     function matchesShortcut(e, shortcut) {
         if (!shortcut) return false;
         const targetKey = (shortcut.key || 'f').toLowerCase();
         const eventKey = (e.key || '').toLowerCase();
         const eventCode = (e.code || '').toLowerCase();
 
-        // Support both character key match and physical key code (e.g. KeyF for Korean IME)
+        // 한글 입력기 상태에서도 단축키가 정상 트리거되도록 물리 키 코드(KeyF) 병행 검사
         const keyMatch = (eventKey === targetKey) ||
                          (eventCode === 'key' + targetKey) ||
                          (targetKey === 'f' && (e.keyCode === 70 || e.which === 70));
@@ -1662,9 +1877,9 @@
         return keyMatch && ctrlMatch && altMatch && shiftMatch && metaMatch;
     }
 
-    // Global Keydown listener for shortcut and F3/F4 navigation
+    // 웹페이지 전역 키보드 단축키 및 F3/F4 탐색 이벤트 리스너
     window.addEventListener('keydown', (e) => {
-        // Custom shortcut (default: Ctrl+F)
+        // 커스텀 검색 호출 단축키 (기본: Ctrl+F)
         if (matchesShortcut(e, config.shortcut)) {
             e.preventDefault();
             e.stopPropagation();
@@ -1672,22 +1887,18 @@
             return;
         }
 
-        // F3 -> Move Next for active bar
+        // F3 키: 활성 검색바의 다음 일치 항목 이동 (Shift+F3은 이전 이동)
         if (e.key === 'F3') {
             const target = activeBar || bars[0];
             if (target && target.matches.length > 0) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (e.shiftKey) {
-                    moveToPrev(target);
-                } else {
-                    moveToNext(target);
-                }
+                e.shiftKey ? moveToPrev(target) : moveToNext(target);
             }
             return;
         }
 
-        // F4 -> Move Prev for active bar
+        // F4 키: 활성 검색바의 이전 일치 항목 이동
         if (e.key === 'F4') {
             const target = activeBar || bars[0];
             if (target && target.matches.length > 0) {
@@ -1698,14 +1909,16 @@
             return;
         }
 
-        // Escape when bars are open
+        // ESC 키: 검색창이 열려있을 때 닫기
         if (e.key === 'Escape' && isBarVisible) {
             e.preventDefault();
             hideAllSearchBars();
         }
     }, true);
 
-    // Message listener for external requests (e.g. from popup or background)
+// ## 단계 990: 외부 메시지 수신, 탭 활성화 감지 및 초기화
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // 팝업 또는 백그라운드로부터 전달되는 OPEN_SEARCH 메시지 처리
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request && request.type === 'OPEN_SEARCH') {
             showSearchBar();
@@ -1715,7 +1928,7 @@
         return false;
     });
 
-    // Sync bookmarks when user switches back to this tab
+    // 탭 전환 복귀 시 최신 북마크 스토리지 동기화
     window.addEventListener('focus', () => {
         loadBookmarks(() => {
             if (isBarVisible) {
@@ -1734,13 +1947,17 @@
         }
     });
 
-    // Check if there is a pending bookmark query to consume on page load
+    //------------------------------------------------------------------------------------------------------
+    // 북마크 클릭으로 페이지 이동 후 세션에 대기 중인 검색 키워드가 있는지 확인하여 자동 검색을 수행한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
     function checkPendingBookmarkQuery() {
         try {
             const pendingQuery = sessionStorage.getItem('search_ext_pending_query');
             if (pendingQuery !== null) {
                 sessionStorage.removeItem('search_ext_pending_query');
-                // Allow page DOM to stabilize slightly before applying
+                // DOM 렌더링 안정화를 위해 소폭 지연 후 검색어 주입
                 setTimeout(() => {
                     applyPendingBookmarkQuery(pendingQuery);
                 }, 150);
@@ -1748,7 +1965,7 @@
         } catch (e) {}
     }
 
-    // Initialize
+    // content script 초기 실행 시 환경설정 로드 및 대기 쿼리 확인
     loadConfig(() => {
         loadBookmarks();
         checkPendingBookmarkQuery();

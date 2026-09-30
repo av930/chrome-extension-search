@@ -327,10 +327,10 @@
                 background: transparent;
                 border: none;
                 outline: none;
-                color: #c0c4d6;
+                color: #e2e5f2;
                 border-radius: 9999px;
-                width: 20px;
-                height: 20px;
+                width: 22px;
+                height: 22px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -339,13 +339,15 @@
                 transition: background-color 0.1s, color 0.1s;
             }
             .btn-nav:hover {
-                background-color: rgba(255, 255, 255, 0.15);
+                background-color: rgba(255, 255, 255, 0.2);
                 color: #ffffff;
             }
             .btn-nav svg {
-                width: 10px;
-                height: 10px;
+                width: 14px;
+                height: 14px;
                 fill: currentColor;
+                stroke: currentColor;
+                stroke-width: 1px;
             }
             .btn-close {
                 background-color: #383a4c;
@@ -478,11 +480,11 @@
             <div class="options-group">
                 <label class="opt-label opt-case" title="대소문자 구분">
                     <input type="checkbox" class="chk-case">
-                    <span>Match Case</span>
+                    <span>MatchCase</span>
                 </label>
                 <label class="opt-label opt-word" title="단어 단위 일치">
                     <input type="checkbox" class="chk-word">
-                    <span>By Word</span>
+                    <span>ByWord</span>
                 </label>
                 <label class="opt-label opt-regex" title="정규 표현식 검색">
                     <input type="checkbox" class="chk-regex">

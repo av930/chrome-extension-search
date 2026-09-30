@@ -73,8 +73,9 @@
         highlightColor: '#ffe600',
         activeHighlightColor: '#ff8f00',
         autoMove: true,
-        defaultBarCount: 1,
-        lastBarsState: null
+        defaultBarCount: 2,
+        lastBarsState: null,
+        ignoreDelimiters: '-'
     };
 
     // State
@@ -135,7 +136,8 @@
             'activeHighlightColor',
             'autoMove',
             'defaultBarCount',
-            'lastBarsState'
+            'lastBarsState',
+            'ignoreDelimiters'
         ], (result) => {
             config._loaded = true;
             if (chrome.runtime.lastError) {
@@ -155,6 +157,7 @@
             if (typeof result.autoMove === 'boolean') config.autoMove = result.autoMove;
             if (typeof result.defaultBarCount === 'number') config.defaultBarCount = result.defaultBarCount;
             if (Array.isArray(result.lastBarsState)) config.lastBarsState = result.lastBarsState;
+            if (typeof result.ignoreDelimiters === 'string') config.ignoreDelimiters = result.ignoreDelimiters;
             if (callback) callback();
         });
     }
@@ -200,6 +203,7 @@
         if (changes.autoMove) config.autoMove = changes.autoMove.newValue;
         if (changes.defaultBarCount) config.defaultBarCount = changes.defaultBarCount.newValue;
         if (changes.lastBarsState) config.lastBarsState = changes.lastBarsState.newValue;
+        if (changes.ignoreDelimiters) config.ignoreDelimiters = changes.ignoreDelimiters.newValue;
     });
 
     // Create Base UI Container in Shadow DOM
@@ -537,7 +541,7 @@
             .common-left-group {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 2px;
                 flex-shrink: 0;
             }
             .btn-thick-nav {
@@ -545,8 +549,8 @@
                 border: none;
                 outline: none;
                 color: #38bdf8;
-                width: 26px;
-                height: 26px;
+                width: 24px;
+                height: 24px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -564,8 +568,8 @@
                 transform: scale(0.95);
             }
             .btn-thick-nav svg {
-                width: 22px;
-                height: 22px;
+                width: 20px;
+                height: 20px;
             }
             .btn-text-select {
                 background: transparent;
@@ -575,7 +579,7 @@
                 font-size: 13px;
                 font-weight: 500;
                 cursor: pointer;
-                padding: 4px 6px;
+                padding: 3px 5px;
                 border-radius: 4px;
                 font-family: inherit;
                 transition: background-color 0.15s, color 0.15s;
@@ -650,17 +654,27 @@
         commonBar.className = 'common-bar';
         commonBar.innerHTML = `
             <div class="common-left-group">
-                <button type="button" class="btn-thick-nav btn-thick-prev" title="이전 선택 또는 이전 검색 일치 항목 이동">
+                <button type="button" class="btn-thick-nav btn-fast-prev" title="선택 영역 왼쪽 3단어 확장 (Expand selection 3 words left)">
                     <svg viewBox="0 0 24 24">
-                        <path d="M15.5 5L8.5 12L15.5 19" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M19 6L14 12L19 18 M14 6L9 12L14 18 M9 6L4 12L9 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
-                <button type="button" class="btn-text-select" title="선택된 텍스트로 검색하거나 첫 번째 검색바로 이동">
+                <button type="button" class="btn-thick-nav btn-thick-prev" title="선택 영역 왼쪽 1단어 확장 (Expand selection 1 word left)">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M15 5L8 12L15 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button type="button" class="btn-text-select" title="현재 선택된 텍스트 클립보드로 복사 (Copy selected text)">
                     text select
                 </button>
-                <button type="button" class="btn-thick-nav btn-thick-next" title="다음 선택 또는 다음 검색 일치 항목 이동">
+                <button type="button" class="btn-thick-nav btn-thick-next" title="선택 영역 오른쪽 1단어 확장 (Expand selection 1 word right)">
                     <svg viewBox="0 0 24 24">
-                        <path d="M8.5 5L15.5 12L8.5 19" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M9 5L16 12L9 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button type="button" class="btn-thick-nav btn-fast-next" title="선택 영역 오른쪽 3단어 확장 (Expand selection 3 words right)">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M5 6L10 12L5 18 M10 6L15 12L10 18 M15 6L20 12L15 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
             </div>
@@ -670,26 +684,42 @@
         bookmarksContainer = commonBar.querySelector('.bookmarks-bar');
 
         // Attach event listeners for common bar buttons
+        const btnFastPrev = commonBar.querySelector('.btn-fast-prev');
         const btnThickPrev = commonBar.querySelector('.btn-thick-prev');
-        const btnThickNext = commonBar.querySelector('.btn-thick-next');
         const btnTextSelect = commonBar.querySelector('.btn-text-select');
+        const btnThickNext = commonBar.querySelector('.btn-thick-next');
+        const btnFastNext = commonBar.querySelector('.btn-fast-next');
 
-        btnThickPrev.addEventListener('click', () => {
-            const target = activeBar || bars[0];
-            if (target) {
-                moveToPrev(target);
-            }
+        // Prevent mousedown from clearing the page text selection
+        btnFastPrev.addEventListener('mousedown', (e) => e.preventDefault());
+        btnThickPrev.addEventListener('mousedown', (e) => e.preventDefault());
+        btnTextSelect.addEventListener('mousedown', (e) => e.preventDefault());
+        btnThickNext.addEventListener('mousedown', (e) => e.preventDefault());
+        btnFastNext.addEventListener('mousedown', (e) => e.preventDefault());
+
+        btnFastPrev.addEventListener('click', (e) => {
+            e.preventDefault();
+            expandSelectionLeft(3);
         });
 
-        btnThickNext.addEventListener('click', () => {
-            const target = activeBar || bars[0];
-            if (target) {
-                moveToNext(target);
-            }
+        btnThickPrev.addEventListener('click', (e) => {
+            e.preventDefault();
+            expandSelectionLeft(1);
         });
 
-        btnTextSelect.addEventListener('click', () => {
-            handleTextSelectAction();
+        btnThickNext.addEventListener('click', (e) => {
+            e.preventDefault();
+            expandSelectionRight(1);
+        });
+
+        btnFastNext.addEventListener('click', (e) => {
+            e.preventDefault();
+            expandSelectionRight(3);
+        });
+
+        btnTextSelect.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleTextSelectAction(btnTextSelect);
         });
 
         shadowRoot.appendChild(style);
@@ -994,23 +1024,217 @@
         }
     }
 
-    // Action when user clicks "text select" in common bar
-    function handleTextSelectAction() {
-        const selection = window.getSelection()?.toString().trim();
+    // Get current text selection, or initialize selection from the active search match
+    function getOrInitSelection() {
+        const sel = window.getSelection();
+        if (!sel) return null;
+
+        if (sel.rangeCount > 0 && !sel.isCollapsed && sel.toString().length > 0) {
+            return sel;
+        }
+
+        // If no user selection exists, select the current active match element
         const target = activeBar || bars[0];
-        if (selection && target) {
-            target.query = selection;
-            target.ui.input.value = selection;
-            target.ui.btnClear.classList.add('visible');
-            setActiveBar(target);
-            target.ui.input.focus();
-            target.ui.input.select();
-            performAllSearches(target);
-            saveBarsState();
-        } else if (target) {
-            setActiveBar(target);
-            target.ui.input.focus();
-            target.ui.input.select();
+        if (target && target.matches && target.matches.length > 0 && target.currentIndex >= 0) {
+            const activeEl = target.matches[target.currentIndex];
+            if (activeEl && activeEl.isConnected) {
+                const range = document.createRange();
+                range.selectNodeContents(activeEl);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                return sel;
+            }
+        }
+
+        return (sel.rangeCount > 0 && !sel.isCollapsed) ? sel : null;
+    }
+
+    // Helper: Check if character is an ignored delimiter
+    function isIgnoredDelimiter(char) {
+        if (!char || typeof config.ignoreDelimiters !== 'string') return false;
+        return config.ignoreDelimiters.includes(char);
+    }
+
+    // Expand current selection to the left by words (default: 1)
+    function expandSelectionLeft(wordCount = 1) {
+        const sel = getOrInitSelection();
+        if (!sel || sel.rangeCount === 0) return;
+
+        const range = sel.getRangeAt(0);
+        let startNode = range.startContainer;
+        let startOffset = range.startOffset;
+        const fixedEndNode = range.endContainer;
+        const fixedEndOffset = range.endOffset;
+
+        // Anchor at fixed end, focus at moving start
+        sel.setBaseAndExtent(fixedEndNode, fixedEndOffset, startNode, startOffset);
+
+        for (let step = 0; step < wordCount; step++) {
+            let lastLen = sel.toString().length;
+            sel.modify('extend', 'backward', 'word');
+            if (sel.toString().length === lastLen) {
+                sel.modify('extend', 'backward', 'word');
+            }
+            if (sel.toString().length === lastLen) {
+                break; // Cannot expand further
+            }
+
+            // If ignoreDelimiters are configured, bridge across them
+            if (config.ignoreDelimiters) {
+                let loopCount = 0;
+                while (loopCount++ < 15) {
+                    const currentText = sel.toString();
+                    if (!currentText) break;
+
+                    // 1) If current selection starts with an ignored delimiter, expand backward further
+                    if (isIgnoredDelimiter(currentText[0])) {
+                        const lenBefore = currentText.length;
+                        sel.modify('extend', 'backward', 'word');
+                        if (sel.toString().length > lenBefore) continue;
+                    }
+
+                    // 2) Peek at the preceding character
+                    const currentRange = sel.getRangeAt(0).cloneRange();
+                    const lenBeforePeek = currentText.length;
+                    sel.modify('extend', 'backward', 'character');
+                    const textWithPeek = sel.toString();
+
+                    if (textWithPeek.length > lenBeforePeek) {
+                        const prevChar = textWithPeek[0];
+                        if (isIgnoredDelimiter(prevChar)) {
+                            // Preceding char is an ignored delimiter: bridge across it
+                            sel.modify('extend', 'backward', 'word');
+                            continue;
+                        } else {
+                            // Restore back to currentRange (revert 1 character extension)
+                            sel.setBaseAndExtent(
+                                fixedEndNode,
+                                fixedEndOffset,
+                                currentRange.startContainer,
+                                currentRange.startOffset
+                            );
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Expand current selection to the right by words (default: 1)
+    function expandSelectionRight(wordCount = 1) {
+        const sel = getOrInitSelection();
+        if (!sel || sel.rangeCount === 0) return;
+
+        const range = sel.getRangeAt(0);
+        const fixedStartNode = range.startContainer;
+        const fixedStartOffset = range.startOffset;
+        let endNode = range.endContainer;
+        let endOffset = range.endOffset;
+
+        // Anchor at fixed start, focus at moving end
+        sel.setBaseAndExtent(fixedStartNode, fixedStartOffset, endNode, endOffset);
+
+        for (let step = 0; step < wordCount; step++) {
+            let lastLen = sel.toString().length;
+            sel.modify('extend', 'forward', 'word');
+            if (sel.toString().length === lastLen) {
+                sel.modify('extend', 'forward', 'word');
+            }
+            if (sel.toString().length === lastLen) {
+                break; // Cannot expand further
+            }
+
+            // If ignoreDelimiters are configured, bridge across them
+            if (config.ignoreDelimiters) {
+                let loopCount = 0;
+                while (loopCount++ < 15) {
+                    const currentText = sel.toString();
+                    if (!currentText) break;
+
+                    // 1) If current selection ends with an ignored delimiter, expand forward further
+                    if (isIgnoredDelimiter(currentText[currentText.length - 1])) {
+                        const lenBefore = currentText.length;
+                        sel.modify('extend', 'forward', 'word');
+                        if (sel.toString().length > lenBefore) continue;
+                    }
+
+                    // 2) Peek at the succeeding character
+                    const currentRange = sel.getRangeAt(0).cloneRange();
+                    const lenBeforePeek = currentText.length;
+                    sel.modify('extend', 'forward', 'character');
+                    const textWithPeek = sel.toString();
+
+                    if (textWithPeek.length > lenBeforePeek) {
+                        const nextChar = textWithPeek[textWithPeek.length - 1];
+                        if (isIgnoredDelimiter(nextChar)) {
+                            // Next char is an ignored delimiter: bridge across it
+                            sel.modify('extend', 'forward', 'word');
+                            continue;
+                        } else {
+                            // Restore back to currentRange (revert 1 character extension)
+                            sel.setBaseAndExtent(
+                                fixedStartNode,
+                                fixedStartOffset,
+                                currentRange.endContainer,
+                                currentRange.endOffset
+                            );
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Copy selected text to clipboard and provide visual feedback
+    async function handleTextSelectAction(btnEl) {
+        const sel = getOrInitSelection();
+        let textToCopy = (sel && !sel.isCollapsed) ? sel.toString() : '';
+
+        if (!textToCopy) {
+            const target = activeBar || bars[0];
+            if (target && target.query) {
+                textToCopy = target.query;
+            }
+        }
+
+        if (!textToCopy) return;
+
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(textToCopy);
+                copied = true;
+            }
+        } catch (e) {}
+
+        if (!copied) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = textToCopy;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                ta.style.pointerEvents = 'none';
+                document.body.appendChild(ta);
+                ta.select();
+                copied = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (e) {}
+        }
+
+        if (btnEl && copied) {
+            const originalText = btnEl.textContent;
+            btnEl.textContent = 'Copied!';
+            btnEl.style.color = '#4ade80';
+            setTimeout(() => {
+                btnEl.textContent = originalText;
+                btnEl.style.color = '';
+            }, 1000);
         }
     }
 
@@ -1072,7 +1296,7 @@
                 if (Array.isArray(config.lastBarsState) && config.lastBarsState.length > 0) {
                     statesToRestore = config.lastBarsState;
                 } else {
-                    const count = Math.max(1, config.defaultBarCount || 1);
+                    const count = Math.max(1, config.defaultBarCount || 2);
                     for (let i = 0; i < count; i++) {
                         statesToRestore.push({
                             caseSensitive: false,

@@ -10,7 +10,8 @@ chrome.runtime.onInstalled.addListener((details) => {
         'highlightColor',
         'activeHighlightColor',
         'defaultBarCount',
-        'lastBarsState'
+        'lastBarsState',
+        'ignoreDelimiters'
     ], (result) => {
         const defaults = {};
         if (!result.shortcut) {
@@ -26,7 +27,10 @@ chrome.runtime.onInstalled.addListener((details) => {
             defaults.activeHighlightColor = '#ff8f00';
         }
         if (typeof result.defaultBarCount !== 'number') {
-            defaults.defaultBarCount = 1;
+            defaults.defaultBarCount = 2;
+        }
+        if (typeof result.ignoreDelimiters !== 'string') {
+            defaults.ignoreDelimiters = '-';
         }
 
         if (Object.keys(defaults).length > 0) {

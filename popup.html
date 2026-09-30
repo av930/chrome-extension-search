@@ -19,7 +19,10 @@
             </button>
         </div>
 
-        <div class="divider"></div>
+        <div class="feedback-row">
+            <span class="divider-line"></span>
+            <span class="feedback-text">Donate & feedback : av9300@gmail.com</span>
+        </div>
 
         <!-- 옵션 설정 UI -->
         <div class="settings-section">
@@ -38,7 +41,7 @@
                 <div class="counter-row">
                     <span class="setting-label">기본 검색바 개수 (초기값)</span>
                     <div class="number-stepper">
-                        <input type="number" id="defaultBarCount" min="1" max="6" value="1" class="number-input">
+                        <input type="number" id="defaultBarCount" min="1" max="6" value="2" class="number-input">
                         <span class="unit-text">개</span>
                     </div>
                 </div>
@@ -50,6 +53,12 @@
                     <span class="setting-label">첫 일치 항목 자동 이동 (Auto-Move)</span>
                     <input type="checkbox" id="autoMoveToggle" class="toggle-checkbox">
                 </label>
+            </div>
+
+            <!-- 선택기능 무시구분자 -->
+            <div class="setting-item row-layout">
+                <span class="setting-label" title="단어 확장 선택 시 구분자로 취급하지 않을 문자 목록">선택기능 무시구분자</span>
+                <input type="text" id="ignoreDelimiters" class="text-input-sm" value="-" placeholder="예: -">
             </div>
 
             <!-- 하이라이트 색상 설정 -->

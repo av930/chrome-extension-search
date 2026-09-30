@@ -3,9 +3,10 @@
 const DEFAULT_CONFIG = {
     shortcut: { ctrl: true, alt: false, shift: false, meta: false, key: 'f' },
     autoMove: true,
-    defaultBarCount: 1,
+    defaultBarCount: 2,
     highlightColor: '#ffe600',
-    activeHighlightColor: '#ff8f00'
+    activeHighlightColor: '#ff8f00',
+    ignoreDelimiters: '-'
 };
 
 let currentShortcut = { ...DEFAULT_CONFIG.shortcut };
@@ -41,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resetShortcutBtn = document.getElementById('resetShortcutBtn');
     const defaultBarCountInput = document.getElementById('defaultBarCount');
     const autoMoveToggle = document.getElementById('autoMoveToggle');
+    const ignoreDelimitersInput = document.getElementById('ignoreDelimiters');
     const highlightColorInput = document.getElementById('highlightColor');
     const activeHighlightColorInput = document.getElementById('activeHighlightColor');
 
@@ -50,7 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'autoMove',
         'defaultBarCount',
         'highlightColor',
-        'activeHighlightColor'
+        'activeHighlightColor',
+        'ignoreDelimiters'
     ], (result) => {
         if (result.shortcut) {
             currentShortcut = { ...result.shortcut };
@@ -67,6 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
             autoMoveToggle.checked = result.autoMove;
         } else {
             autoMoveToggle.checked = DEFAULT_CONFIG.autoMove;
+        }
+
+        if (typeof result.ignoreDelimiters === 'string') {
+            ignoreDelimitersInput.value = result.ignoreDelimiters;
+        } else {
+            ignoreDelimitersInput.value = DEFAULT_CONFIG.ignoreDelimiters;
         }
 
         if (result.highlightColor) {
@@ -211,6 +220,14 @@ document.addEventListener('DOMContentLoaded', () => {
     autoMoveToggle.addEventListener('change', () => {
         chrome.storage.sync.set({ autoMove: autoMoveToggle.checked }, () => {
             showToast('자동 이동 설정이 저장되었습니다.');
+        });
+    });
+
+    // Ignore delimiters for word expansion
+    ignoreDelimitersInput.addEventListener('change', () => {
+        const val = ignoreDelimitersInput.value;
+        chrome.storage.sync.set({ ignoreDelimiters: val }, () => {
+            showToast('무시 구분자 설정이 저장되었습니다.');
         });
     });
 

@@ -81,10 +81,47 @@
     let isBarVisible = false;
     let shadowRoot = null;
     let hostElement = null;
+    let commonBar = null;
     let barsContainer = null;
+    let bookmarksContainer = null;
+    let bookmarks = [];
     let bars = [];
     let nextBarId = 1;
     let activeBar = null;
+
+    // Predefined vibrant colors for bookmark pins
+    const BOOKMARK_COLORS = [
+        '#29b6f6', '#ab47bc', '#26a69a', '#ffa726',
+        '#ef5350', '#ec407a', '#7e57c2', '#42a5f5',
+        '#26c6da', '#66bb6a', '#9ccc65', '#d4e157',
+        '#ffee58', '#ffca28', '#8d6e63', '#78909c'
+    ];
+
+    function getRandomBookmarkColor() {
+        return BOOKMARK_COLORS[Math.floor(Math.random() * BOOKMARK_COLORS.length)];
+    }
+
+    // Load bookmarks from chrome.storage.local
+    function loadBookmarks(callback) {
+        if (!chrome.runtime?.id) {
+            if (callback) callback();
+            return;
+        }
+        chrome.storage.local.get(['bookmarks'], (result) => {
+            if (Array.isArray(result.bookmarks)) {
+                bookmarks = result.bookmarks;
+            } else {
+                bookmarks = [];
+            }
+            if (callback) callback();
+        });
+    }
+
+    // Save bookmarks to chrome.storage.local
+    function saveBookmarks() {
+        if (!chrome.runtime?.id) return;
+        chrome.storage.local.set({ bookmarks: bookmarks });
+    }
 
     // Load configuration from chrome.storage
     function loadConfig(callback) {
@@ -138,6 +175,15 @@
 
     // Listen for storage changes
     chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'local') {
+            if (changes.bookmarks) {
+                bookmarks = changes.bookmarks.newValue || [];
+                if (isBarVisible) {
+                    renderBookmarks();
+                }
+            }
+            return;
+        }
         if (areaName !== 'sync') return;
         if (changes.shortcut) config.shortcut = changes.shortcut.newValue;
         if (changes.highlightColor) {
@@ -158,7 +204,12 @@
 
     // Create Base UI Container in Shadow DOM
     function createUI() {
-        if (shadowRoot) return;
+        if (shadowRoot && hostElement && hostElement.isConnected) return;
+
+        if (hostElement && !hostElement.isConnected) {
+            (document.body || document.documentElement).appendChild(hostElement);
+            return;
+        }
 
         // Remove any old orphaned root element if present
         const oldRoot = document.getElementById('chrome-ext-search-root');
@@ -261,7 +312,8 @@
                 border-radius: 9999px;
                 padding: 2px 6px 2px 10px;
                 gap: 6px;
-                flex-shrink: 0;
+                flex-shrink: 1;
+                min-width: 140px;
                 transition: border-color 0.15s;
             }
             .input-box:focus-within {
@@ -277,6 +329,7 @@
                 color: #ffffff;
                 font-size: 12px;
                 width: 115px;
+                min-width: 60px;
                 font-family: inherit;
             }
             .search-input::placeholder {
@@ -429,12 +482,218 @@
                 position: relative;
                 top: -1px;
             }
+            .btn-bookmark {
+                background: transparent;
+                border: none;
+                outline: none;
+                color: #38bdf8;
+                border-radius: 50%;
+                width: 24px;
+                height: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                padding: 0;
+                flex-shrink: 0;
+                transition: color 0.15s, background-color 0.15s, transform 0.15s;
+            }
+            .btn-bookmark:hover {
+                background-color: rgba(56, 189, 248, 0.2);
+                color: #7dd3fc;
+                transform: scale(1.15);
+            }
+            .btn-bookmark svg {
+                width: 16px;
+                height: 16px;
+            }
+            .bookmarks-bar {
+                display: flex;
+                flex-direction: row-reverse;
+                align-items: center;
+                gap: 8px;
+                max-width: 100%;
+                overflow-x: auto;
+                scrollbar-width: thin;
+            }
+            .common-bar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background-color: #3f4459;
+                border: 1px solid #545b77;
+                border-radius: 12px;
+                padding: 6px 12px;
+                gap: 12px;
+                color: #e1e3ea;
+                font-size: 13px;
+                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+                user-select: none;
+                white-space: nowrap;
+                flex-shrink: 0;
+                width: 100%;
+                min-height: 48px;
+            }
+            .common-left-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-shrink: 0;
+            }
+            .btn-thick-nav {
+                background: transparent;
+                border: none;
+                outline: none;
+                color: #38bdf8;
+                width: 26px;
+                height: 26px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                padding: 0;
+                border-radius: 4px;
+                transition: background-color 0.15s, color 0.15s, transform 0.1s;
+            }
+            .btn-thick-nav:hover {
+                background-color: rgba(56, 189, 248, 0.15);
+                color: #7dd3fc;
+                transform: scale(1.08);
+            }
+            .btn-thick-nav:active {
+                transform: scale(0.95);
+            }
+            .btn-thick-nav svg {
+                width: 22px;
+                height: 22px;
+            }
+            .btn-text-select {
+                background: transparent;
+                border: none;
+                outline: none;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                padding: 4px 6px;
+                border-radius: 4px;
+                font-family: inherit;
+                transition: background-color 0.15s, color 0.15s;
+            }
+            .btn-text-select:hover {
+                background-color: rgba(255, 255, 255, 0.12);
+                color: #38bdf8;
+            }
+            .common-right-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-shrink: 0;
+                margin-left: auto;
+            }
+            .bookmark-clip-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                flex-shrink: 0;
+            }
+            .btn-pin-clip {
+                background: rgba(30, 32, 44, 0.9);
+                border: 1px solid #4a5068;
+                border-radius: 6px;
+                padding: 4px 6px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: transform 0.15s, border-color 0.15s, background-color 0.15s;
+            }
+            .btn-pin-clip:hover {
+                transform: translateY(-2px);
+                border-color: #6088d4;
+                background-color: #2b2e3e;
+            }
+            .btn-pin-clip svg {
+                width: 18px;
+                height: 18px;
+                filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+            }
+            .btn-clip-delete {
+                background-color: #232533;
+                border: 1px solid #4a5068;
+                color: #8f95a8;
+                border-radius: 4px;
+                width: 20px;
+                height: 16px;
+                font-size: 10px;
+                line-height: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                padding: 0;
+                transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+            }
+            .btn-clip-delete:hover {
+                background-color: #ed4245;
+                border-color: #ed4245;
+                color: #ffffff;
+            }
         `;
 
         barsContainer = document.createElement('div');
         barsContainer.className = 'bars-container';
 
+        // Create common-bar at the top
+        commonBar = document.createElement('div');
+        commonBar.className = 'common-bar';
+        commonBar.innerHTML = `
+            <div class="common-left-group">
+                <button type="button" class="btn-thick-nav btn-thick-prev" title="이전 선택 또는 이전 검색 일치 항목 이동">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M15.5 5L8.5 12L15.5 19" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button type="button" class="btn-text-select" title="선택된 텍스트로 검색하거나 첫 번째 검색바로 이동">
+                    text select
+                </button>
+                <button type="button" class="btn-thick-nav btn-thick-next" title="다음 선택 또는 다음 검색 일치 항목 이동">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M8.5 5L15.5 12L8.5 19" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="common-right-group bookmarks-bar"></div>
+        `;
+
+        bookmarksContainer = commonBar.querySelector('.bookmarks-bar');
+
+        // Attach event listeners for common bar buttons
+        const btnThickPrev = commonBar.querySelector('.btn-thick-prev');
+        const btnThickNext = commonBar.querySelector('.btn-thick-next');
+        const btnTextSelect = commonBar.querySelector('.btn-text-select');
+
+        btnThickPrev.addEventListener('click', () => {
+            const target = activeBar || bars[0];
+            if (target) {
+                moveToPrev(target);
+            }
+        });
+
+        btnThickNext.addEventListener('click', () => {
+            const target = activeBar || bars[0];
+            if (target) {
+                moveToNext(target);
+            }
+        });
+
+        btnTextSelect.addEventListener('click', () => {
+            handleTextSelectAction();
+        });
+
         shadowRoot.appendChild(style);
+        barsContainer.appendChild(commonBar);
         shadowRoot.appendChild(barsContainer);
         (document.body || document.documentElement).appendChild(hostElement);
     }
@@ -490,6 +749,11 @@
                     <input type="checkbox" class="chk-regex">
                     <span>RegExp</span>
                 </label>
+                <button type="button" class="btn-bookmark" title="현재 페이지 및 검색어 북마크 (Pin to bookmarks)">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6l1 1 1-1v-6H18v-2l-2-2z" transform="rotate(45 12 12)" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
             </div>
         `;
 
@@ -519,7 +783,8 @@
                 chkWord: row.querySelector('.chk-word'),
                 labelWord: row.querySelector('.opt-word'),
                 chkRegex: row.querySelector('.chk-regex'),
-                labelRegex: row.querySelector('.opt-regex')
+                labelRegex: row.querySelector('.opt-regex'),
+                btnBookmark: row.querySelector('.btn-bookmark')
             }
         };
 
@@ -616,6 +881,12 @@
             removeSearchBar(bar);
         });
 
+        if (bar.ui.btnBookmark) {
+            bar.ui.btnBookmark.addEventListener('click', () => {
+                addBookmark(bar);
+            });
+        }
+
         bars.push(bar);
         setActiveBar(bar);
 
@@ -663,6 +934,127 @@
 
         performAllSearches();
         saveBarsState();
+    }
+
+    // Add current page and search keyword to bookmarks
+    function addBookmark(bar) {
+        const keyword = (bar && bar.ui.input.value) ? bar.ui.input.value.trim() : '';
+        const currentUrl = window.location.href;
+        const newBookmark = {
+            id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            url: currentUrl,
+            keyword: keyword,
+            color: getRandomBookmarkColor(),
+            createdAt: Date.now()
+        };
+
+        bookmarks.push(newBookmark);
+        saveBookmarks();
+        renderBookmarks();
+    }
+
+    // Delete a bookmark by ID
+    function deleteBookmark(bookmarkId) {
+        bookmarks = bookmarks.filter(b => b.id !== bookmarkId);
+        saveBookmarks();
+        renderBookmarks();
+    }
+
+    // Open bookmarked page and auto-populate search keyword
+    function openBookmark(bookmark) {
+        if (!bookmark) return;
+
+        // Save pending search query to session storage so new page or current page can consume it
+        try {
+            sessionStorage.setItem('search_ext_pending_query', bookmark.keyword || '');
+        } catch (e) {}
+
+        const currentUrl = window.location.href;
+        // Compare URLs ignoring hash or search if identical
+        if (currentUrl === bookmark.url) {
+            applyPendingBookmarkQuery(bookmark.keyword || '');
+        } else {
+            window.location.href = bookmark.url;
+        }
+    }
+
+    // Apply pending query to the first search bar and trigger search
+    function applyPendingBookmarkQuery(keyword) {
+        showSearchBar();
+        if (bars.length > 0) {
+            const firstBar = bars[0];
+            firstBar.query = keyword;
+            firstBar.ui.input.value = keyword;
+            firstBar.ui.btnClear.classList.toggle('visible', !!keyword);
+            setActiveBar(firstBar);
+            firstBar.ui.input.focus();
+            firstBar.ui.input.select();
+            performAllSearches(firstBar);
+            saveBarsState();
+        }
+    }
+
+    // Action when user clicks "text select" in common bar
+    function handleTextSelectAction() {
+        const selection = window.getSelection()?.toString().trim();
+        const target = activeBar || bars[0];
+        if (selection && target) {
+            target.query = selection;
+            target.ui.input.value = selection;
+            target.ui.btnClear.classList.add('visible');
+            setActiveBar(target);
+            target.ui.input.focus();
+            target.ui.input.select();
+            performAllSearches(target);
+            saveBarsState();
+        } else if (target) {
+            setActiveBar(target);
+            target.ui.input.focus();
+            target.ui.input.select();
+        }
+    }
+
+    // Render bookmark clips in common bar (right to left)
+    function renderBookmarks() {
+        if (!bookmarksContainer) return;
+        bookmarksContainer.innerHTML = '';
+
+        if (!bookmarks || bookmarks.length === 0) {
+            return;
+        }
+
+        // Render bookmarks (bookmarks-bar uses flex-direction: row-reverse, so appending order naturally places newest on the right)
+        bookmarks.forEach(bm => {
+            const clipItem = document.createElement('div');
+            clipItem.className = 'bookmark-clip-item';
+
+            const pinBtn = document.createElement('button');
+            pinBtn.type = 'button';
+            pinBtn.className = 'btn-pin-clip';
+            pinBtn.title = `이동 및 검색: "${bm.keyword || '(전체)'}"\nURL: ${bm.url}`;
+            pinBtn.innerHTML = `
+                <svg viewBox="0 0 24 24">
+                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6l1 1 1-1v-6H18v-2l-2-2z" transform="rotate(45 12 12)" fill="${bm.color}" stroke="${bm.color}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            `;
+            pinBtn.addEventListener('click', () => {
+                openBookmark(bm);
+            });
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'btn-clip-delete';
+            delBtn.title = '북마크 삭제';
+            delBtn.textContent = '✕';
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteBookmark(bm.id);
+            });
+
+            clipItem.appendChild(pinBtn);
+            clipItem.appendChild(delBtn);
+            bookmarksContainer.appendChild(clipItem);
+        });
     }
 
     // Show search bar container
@@ -728,6 +1120,10 @@
         } else {
             loadConfig(() => setupBars());
         }
+
+        loadBookmarks(() => {
+            renderBookmarks();
+        });
     }
 
     // Hide search bar container & clean all highlights
@@ -1095,6 +1491,42 @@
         return false;
     });
 
+    // Sync bookmarks when user switches back to this tab
+    window.addEventListener('focus', () => {
+        loadBookmarks(() => {
+            if (isBarVisible) {
+                renderBookmarks();
+            }
+        });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            loadBookmarks(() => {
+                if (isBarVisible) {
+                    renderBookmarks();
+                }
+            });
+        }
+    });
+
+    // Check if there is a pending bookmark query to consume on page load
+    function checkPendingBookmarkQuery() {
+        try {
+            const pendingQuery = sessionStorage.getItem('search_ext_pending_query');
+            if (pendingQuery !== null) {
+                sessionStorage.removeItem('search_ext_pending_query');
+                // Allow page DOM to stabilize slightly before applying
+                setTimeout(() => {
+                    applyPendingBookmarkQuery(pendingQuery);
+                }, 150);
+            }
+        } catch (e) {}
+    }
+
     // Initialize
-    loadConfig();
+    loadConfig(() => {
+        loadBookmarks();
+        checkPendingBookmarkQuery();
+    });
 })();

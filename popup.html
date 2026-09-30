@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Search</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <header class="header">
+            <img src="icon48.png" alt="Search Icon" class="logo">
+            <h1 class="title">Text Search</h1>
+        </header>
+
+        <div class="main-action">
+            <button type="button" id="openSearchBtn" class="btn btn-primary full-width">
+                현재 페이지에서 검색창 열기
+            </button>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 옵션 설정 UI -->
+        <div class="settings-section">
+            <div class="section-title">옵션 설정</div>
+
+            <!-- 단축키 설정 -->
+            <div class="setting-item">
+                <span class="setting-label">검색 호출 단축키</span>
+                <div class="shortcut-box">
+                    <input type="text" id="shortcutDisplay" class="shortcut-input" readonly placeholder="키를 누르세요...">
+                    <button type="button" id="recordShortcutBtn" class="btn btn-sm btn-secondary">변경</button>
+                    <button type="button" id="resetShortcutBtn" class="btn btn-sm btn-outline" title="Ctrl+F로 초기화">초기화</button>
+                </div>
+            </div>
+
+            <!-- 기본 검색바 개수 -->
+            <div class="setting-item">
+                <div class="counter-row">
+                    <span class="setting-label">기본 검색바 개수 (초기값)</span>
+                    <div class="number-stepper">
+                        <input type="number" id="defaultBarCount" min="1" max="6" value="1" class="number-input">
+                        <span class="unit-text">개</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 자동 이동 -->
+            <div class="setting-item">
+                <label class="switch-row">
+                    <span class="setting-label">첫 일치 항목 자동 이동 (Auto-Move)</span>
+                    <input type="checkbox" id="autoMoveToggle" class="toggle-checkbox">
+                </label>
+            </div>
+
+            <!-- 하이라이트 색상 설정 -->
+            <div class="setting-item">
+                <span class="setting-label">1번 검색바 하이라이트 색상</span>
+                <div class="colors-row">
+                    <label class="color-item" title="일반 일치 하이라이트 색상">
+                        <span class="color-text">일반:</span>
+                        <input type="color" id="highlightColor" value="#ffe600">
+                    </label>
+                    <label class="color-item" title="현재 활성 일치 색상">
+                        <span class="color-text">활성:</span>
+                        <input type="color" id="activeHighlightColor" value="#ff8f00">
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div id="statusToast" class="status-toast"></div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

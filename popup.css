@@ -1,0 +1,253 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    width: 280px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    color: #24292f;
+    background-color: #ffffff;
+}
+
+.popup-container {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.logo {
+    width: 22px;
+    height: 22px;
+}
+
+.title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.main-action {
+    margin-top: 2px;
+}
+
+.btn {
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-primary {
+    background-color: #1f883d;
+    color: #ffffff;
+    padding: 9px 12px;
+}
+
+.btn-primary:hover {
+    background-color: #1a7f37;
+}
+
+.btn-sm {
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background-color: #f3f4f6;
+    border: 1px solid #d0d7de;
+    color: #24292f;
+}
+
+.btn-secondary:hover {
+    background-color: #e5e7eb;
+}
+
+.btn-outline {
+    background-color: transparent;
+    border: 1px solid #d0d7de;
+    color: #57606a;
+}
+
+.btn-outline:hover {
+    background-color: #f6f8fa;
+    color: #24292f;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.divider {
+    height: 1px;
+    background-color: #eaeef2;
+    margin: 4px 0;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+
+.section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #57606a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.setting-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.setting-label {
+    font-size: 12px;
+    color: #24292f;
+    font-weight: 500;
+}
+
+.shortcut-box {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.shortcut-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border: 1px solid #d0d7de;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: monospace;
+    color: #24292f;
+    background-color: #f6f8fa;
+    text-align: center;
+}
+
+.shortcut-input.recording {
+    background-color: #e8f0fe;
+    border-color: #0969da;
+    color: #0969da;
+    animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { border-color: #0969da; }
+    50% { border-color: #54a3ff; }
+}
+
+.switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.counter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.number-stepper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.number-input {
+    width: 50px;
+    padding: 3px 6px;
+    border: 1px solid #d0d7de;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: #24292f;
+    background-color: #f6f8fa;
+}
+
+.number-input:focus {
+    outline: none;
+    border-color: #0969da;
+    background-color: #ffffff;
+}
+
+.unit-text {
+    font-size: 12px;
+    color: #57606a;
+}
+
+.toggle-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #1f883d;
+}
+
+.colors-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.color-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #57606a;
+}
+
+.color-item input[type="color"] {
+    -webkit-appearance: none;
+    border: 1px solid #d0d7de;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: none;
+    padding: 0;
+}
+
+.color-item input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-item input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 3px;
+}
+
+.status-toast {
+    min-height: 16px;
+    font-size: 11px;
+    color: #1f883d;
+    text-align: center;
+    font-weight: 600;
+    transition: opacity 0.2s ease;
+}
+}
+
+.link-btn:hover {
+    color: #0550ae;
+}

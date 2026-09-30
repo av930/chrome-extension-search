@@ -1,0 +1,13 @@
+/* content.css - In-page text highlights */
+
+mark.search-ext-highlight {
+    padding: 1px 2px !important;
+    margin: 0 !important;
+    border-radius: 2px !important;
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.4) !important;
+    display: inline !important;
+}
+
+mark.search-ext-highlight.search-ext-active {
+    font-weight: bold !important;
+}

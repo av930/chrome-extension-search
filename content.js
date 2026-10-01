@@ -1213,13 +1213,22 @@
         // 선택 영역이 없다면 현재 검색 일치 항목 엘리먼트를 선택 영역으로 초기화
         const target = activeBar || bars[0];
         if (target && target.matches && target.matches.length > 0 && target.currentIndex >= 0) {
-            const activeEl = target.matches[target.currentIndex];
-            if (activeEl && activeEl.isConnected) {
-                const range = document.createRange();
-                range.selectNodeContents(activeEl);
-                sel.removeAllRanges();
-                sel.addRange(range);
-                return sel;
+            const activeMatch = target.matches[target.currentIndex];
+            if (activeMatch && activeMatch.element && activeMatch.element.isConnected) {
+                if (activeMatch.type === 'mark') {
+                    const range = document.createRange();
+                    range.selectNodeContents(activeMatch.element);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    return sel;
+                } else if (activeMatch.type === 'input') {
+                    try {
+                        activeMatch.element.focus();
+                        if (typeof activeMatch.element.setSelectionRange === 'function') {
+                            activeMatch.element.setSelectionRange(activeMatch.start, activeMatch.end);
+                        }
+                    } catch (e) {}
+                }
             }
         }
 
@@ -1332,10 +1341,16 @@
         const sel = getOrInitSelection();
         let textToCopy = (sel && !sel.isCollapsed) ? sel.toString() : '';
 
-        // 브라우저 텍스트 선택이 없으면 현재 활성 검색바의 검색어 사용
+        // 브라우저 텍스트 선택이 없으면 현재 활성 검색어 또는 일치 텍스트 사용
         if (!textToCopy) {
             const target = activeBar || bars[0];
-            if (target && target.query) {
+            if (target && target.matches && target.matches.length > 0 && target.currentIndex >= 0) {
+                const activeMatch = target.matches[target.currentIndex];
+                if (activeMatch && activeMatch.type === 'input' && activeMatch.element) {
+                    textToCopy = activeMatch.element.value.substring(activeMatch.start, activeMatch.end);
+                }
+            }
+            if (!textToCopy && target && target.query) {
                 textToCopy = target.query;
             }
         }
@@ -1394,8 +1409,20 @@
         // SPA/무한 스크롤로 늦게 로드되는 콘텐츠도 자동 검색되도록 DOM 감시 시작
         startDomObserver();
 
-        // 페이지 내 드래그된 텍스트가 있으면 초기 검색어로 활용
-        const selectedText = window.getSelection()?.toString().trim();
+        // 페이지 내 드래그된 텍스트(일반 텍스트 및 input/textarea 선택 영역)가 있으면 초기 검색어로 활용
+        let selectedText = window.getSelection()?.toString().trim();
+        if (!selectedText) {
+            const activeEl = document.activeElement;
+            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+                try {
+                    const start = activeEl.selectionStart;
+                    const end = activeEl.selectionEnd;
+                    if (typeof start === 'number' && typeof end === 'number' && start !== end) {
+                        selectedText = activeEl.value.substring(start, end).trim();
+                    }
+                } catch (e) {}
+            }
+        }
         const initialQuery = (selectedText && selectedText.length < 100) ? selectedText : '';
 
         // 검색바 인스턴스 생성 및 복원 헬퍼
@@ -1495,6 +1522,7 @@
 
     //------------------------------------------------------------------------------------------------------
     // 본문 및 Shadow DOM/동일 출처 iframe에 삽입된 모든 <mark> 하이라이트를 원본 텍스트 노드로 언랩 복원한다.
+    // 또한 input/textarea 요소에 적용된 하이라이트 클래스 및 테두리 스타일을 원상 복구한다.
     // 성능 최적화: mark별 개별 normalize 호출 대신 부모 노드들을 Set에 모아 한 번씩만 normalize()를 수행한다.
     // 입력: roots - 재사용할 검색 루트 배열 (생략 시 내부에서 직접 수집)
     // 출력: 없음
@@ -1521,6 +1549,28 @@
                     parentsToNormalize.add(parent);
                 }
             });
+
+            // input/textarea 하이라이트 제거 및 원본 테두리 스타일 복원
+            let inputMatches;
+            try {
+                inputMatches = root.querySelectorAll('.search-ext-input-highlight, .search-ext-input-active');
+            } catch (e) { return; }
+
+            inputMatches.forEach(el => {
+                el.classList.remove('search-ext-input-highlight', 'search-ext-input-active');
+                if (el.dataset.searchExtOrigOutline !== undefined) {
+                    el.style.outline = el.dataset.searchExtOrigOutline;
+                    delete el.dataset.searchExtOrigOutline;
+                } else {
+                    el.style.outline = '';
+                }
+                if (el.dataset.searchExtOrigOutlineOffset !== undefined) {
+                    el.style.outlineOffset = el.dataset.searchExtOrigOutlineOffset;
+                    delete el.dataset.searchExtOrigOutlineOffset;
+                } else {
+                    el.style.outlineOffset = '';
+                }
+            });
         });
 
         if (found === 0) return;
@@ -1542,6 +1592,28 @@
 
 // ## 단계 800: 다중 검색바 정규식 컴파일 및 실시간 텍스트 하이라이트 엔진
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // 제외 대상 input 타입 집합 (비밀번호, 비가시, 버튼 등 텍스트 검색과 무관한 폼 요소)
+    const EXCLUDED_INPUT_TYPES = new Set([
+        'password', 'hidden', 'checkbox', 'radio',
+        'file', 'button', 'submit', 'reset', 'image', 'range', 'color'
+    ]);
+
+    //------------------------------------------------------------------------------------------------------
+    // 지정된 엘리먼트가 검색 가능한 텍스트 입력 폼(input 또는 textarea)인지 판별한다.
+    // 입력: el - 검사 대상 엘리먼트
+    // 출력: true(검색 가능) 또는 false
+    //------------------------------------------------------------------------------------------------------
+    function isSearchableInputElement(el) {
+        if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+        const tag = el.tagName;
+        if (tag === 'TEXTAREA') return true;
+        if (tag === 'INPUT') {
+            const type = (el.type || 'text').toLowerCase();
+            return !EXCLUDED_INPUT_TYPES.has(type);
+        }
+        return false;
+    }
+
     //------------------------------------------------------------------------------------------------------
     // 문자열 내 특수 기호를 안전하게 이스케이프하여 정규식 리터럴 패턴으로 만든다.
     // 입력: string - 원본 텍스트
@@ -1694,40 +1766,76 @@
             return;
         }
 
-        // 순수 텍스트 노드만 통과시키는 공용 필터 (태그 기반 저비용 판정만 수행)
-        const textNodeFilter = {
+        // 텍스트 노드 및 검색 가능한 폼 입력 필드(input, textarea)를 아우르는 복합 필터
+        const combinedFilter = {
             acceptNode: (node) => {
-                const parent = node.parentElement;
-                if (!parent) return NodeFilter.FILTER_REJECT;
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    if (node.id === 'chrome-ext-search-root' || (node.closest && node.closest('#chrome-ext-search-root'))) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    if (node.namespaceURI !== 'http://www.w3.org/1999/xhtml') {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    const tag = node.tagName;
+                    if (
+                        tag === 'SCRIPT' ||
+                        tag === 'STYLE' ||
+                        tag === 'NOSCRIPT' ||
+                        tag === 'TEMPLATE' ||
+                        tag === 'CANVAS' ||
+                        tag === 'AUDIO' ||
+                        tag === 'VIDEO' ||
+                        tag === 'OBJECT' ||
+                        tag === 'IFRAME' ||
+                        tag === 'FRAME' ||
+                        tag === 'SELECT'
+                    ) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
 
-                // SVG/MathML 등 비 HTML 네임스페이스는 <mark> 삽입 시 렌더링이 깨지므로 제외
-                if (parent.namespaceURI !== 'http://www.w3.org/1999/xhtml') return NodeFilter.FILTER_REJECT;
+                    if (isSearchableInputElement(node)) {
+                        const val = node.value || node.placeholder || '';
+                        if (val && val.trim()) {
+                            return NodeFilter.FILTER_ACCEPT;
+                        }
+                        return NodeFilter.FILTER_REJECT;
+                    }
 
-                const tag = parent.tagName;
-                // 검색에서 제외할 특수 태그 및 확장 프로그램 자체 UI 필터링
-                if (
-                    tag === 'SCRIPT' ||
-                    tag === 'STYLE' ||
-                    tag === 'NOSCRIPT' ||
-                    tag === 'TEXTAREA' ||
-                    tag === 'INPUT' ||
-                    tag === 'IFRAME' ||
-                    tag === 'OBJECT' ||
-                    tag === 'SELECT' ||
-                    tag === 'OPTION' ||
-                    tag === 'CANVAS' ||
-                    tag === 'AUDIO' ||
-                    tag === 'VIDEO' ||
-                    tag === 'TEMPLATE' ||
-                    parent.id === 'chrome-ext-search-root' ||
-                    parent.closest('#chrome-ext-search-root') ||
-                    parent.isContentEditable
-                ) {
-                    return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_SKIP;
                 }
 
-                if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-                return NodeFilter.FILTER_ACCEPT;
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const parent = node.parentElement;
+                    if (!parent) return NodeFilter.FILTER_REJECT;
+                    if (parent.namespaceURI !== 'http://www.w3.org/1999/xhtml') return NodeFilter.FILTER_REJECT;
+
+                    const pTag = parent.tagName;
+                    if (
+                        pTag === 'SCRIPT' ||
+                        pTag === 'STYLE' ||
+                        pTag === 'NOSCRIPT' ||
+                        pTag === 'TEXTAREA' ||
+                        pTag === 'INPUT' ||
+                        pTag === 'IFRAME' ||
+                        pTag === 'OBJECT' ||
+                        pTag === 'SELECT' ||
+                        pTag === 'OPTION' ||
+                        pTag === 'CANVAS' ||
+                        pTag === 'AUDIO' ||
+                        pTag === 'VIDEO' ||
+                        pTag === 'TEMPLATE' ||
+                        parent.id === 'chrome-ext-search-root' ||
+                        (parent.closest && parent.closest('#chrome-ext-search-root')) ||
+                        parent.isContentEditable
+                    ) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+
+                    if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+
+                return NodeFilter.FILTER_REJECT;
             }
         };
 
@@ -1735,14 +1843,18 @@
         const visibilityCache = new Map();
         const nodesToProcess = [];
 
-        // 각 루트별로 텍스트 노드를 순회하며 검색 패턴 부합 노드 수집
-        // (일반 문자열은 정규식 대신 includes로 고속 사전 필터링하고, 비용이 큰 가시성 검사는 매칭 성공 후에만 수행)
+        // 각 루트별로 텍스트 노드 및 input 요소를 순회하며 검색 패턴 부합 노드 수집
         searchRoots.forEach(root => {
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, textNodeFilter);
+            const walker = document.createTreeWalker(
+                root,
+                NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+                combinedFilter
+            );
             let currentNode = walker.nextNode();
 
             while (currentNode) {
-                const val = currentNode.nodeValue;
+                const isText = (currentNode.nodeType === Node.TEXT_NODE);
+                const val = isText ? currentNode.nodeValue : (currentNode.value || currentNode.placeholder || '');
                 let matched = false;
 
                 for (const item of activeSearchBars) {
@@ -1759,16 +1871,21 @@
                 }
 
                 // 화면에 렌더링되지 않는(display:none 등) 영역은 이동이 불가능하므로 최종 제외
-                if (matched && isVisibleForSearch(currentNode.parentElement, visibilityCache)) {
-                    nodesToProcess.push(currentNode);
+                const targetEl = isText ? currentNode.parentElement : currentNode;
+                if (matched && isVisibleForSearch(targetEl, visibilityCache)) {
+                    nodesToProcess.push({
+                        node: currentNode,
+                        isText: isText,
+                        text: val
+                    });
                 }
                 currentNode = walker.nextNode();
             }
         });
 
-        // 각 텍스트 노드별 일치 구간 분할 및 <mark> 태그 교체
-        nodesToProcess.forEach(textNode => {
-            const text = textNode.nodeValue;
+        // 각 노드별 일치 구간 계산 및 하이라이트/매치 등록
+        nodesToProcess.forEach(item => {
+            const text = item.text;
             const intervals = [];
 
             // 각 검색바별 일치 구간 계산 (한도 초과된 바는 매칭 생성 제외)
@@ -1800,44 +1917,72 @@
             // 중첩되는 구간 제거 (선착순 우선 처리)
             const nonOverlapping = [];
             let lastEnd = 0;
-            for (const item of intervals) {
-                if (item.start >= lastEnd) {
-                    nonOverlapping.push(item);
-                    lastEnd = item.end;
+            for (const interval of intervals) {
+                if (interval.start >= lastEnd) {
+                    nonOverlapping.push(interval);
+                    lastEnd = interval.end;
                 }
             }
 
-            // DocumentFragment를 이용해 노드 일괄 교체
-            const frag = document.createDocumentFragment();
-            let curIdx = 0;
+            if (item.isText) {
+                // DocumentFragment를 이용해 노드 일괄 교체
+                const frag = document.createDocumentFragment();
+                let curIdx = 0;
 
-            for (const item of nonOverlapping) {
-                // 매칭 이전 일반 텍스트 노드 추가
-                if (item.start > curIdx) {
-                    frag.appendChild(document.createTextNode(text.substring(curIdx, item.start)));
+                for (const interval of nonOverlapping) {
+                    // 매칭 이전 일반 텍스트 노드 추가
+                    if (interval.start > curIdx) {
+                        frag.appendChild(document.createTextNode(text.substring(curIdx, interval.start)));
+                    }
+
+                    // 하이라이트 mark 엘리먼트 생성 및 cssText 1회 일괄 할당
+                    const mark = document.createElement('mark');
+                    mark.className = 'search-ext-highlight';
+                    mark.dataset.barId = String(interval.bar.id);
+                    mark.textContent = text.substring(interval.start, interval.end);
+                    mark.style.cssText = `background-color:${interval.bar.colorConfig.highlight};color:${interval.bar.colorConfig.text};`;
+
+                    frag.appendChild(mark);
+                    interval.bar.matches.push({
+                        type: 'mark',
+                        element: mark,
+                        bar: interval.bar
+                    });
+
+                    curIdx = interval.end;
                 }
 
-                // 하이라이트 mark 엘리먼트 생성 및 cssText 1회 일괄 할당
-                const mark = document.createElement('mark');
-                mark.className = 'search-ext-highlight';
-                mark.dataset.barId = String(item.bar.id);
-                mark.textContent = text.substring(item.start, item.end);
-                mark.style.cssText = `background-color:${item.bar.colorConfig.highlight};color:${item.bar.colorConfig.text};`;
+                // 마지막 잔여 텍스트 노드 추가
+                if (curIdx < text.length) {
+                    frag.appendChild(document.createTextNode(text.substring(curIdx)));
+                }
 
-                frag.appendChild(mark);
-                item.bar.matches.push(mark);
+                const parent = item.node.parentNode;
+                if (parent) {
+                    parent.replaceChild(frag, item.node);
+                }
+            } else {
+                // INPUT / TEXTAREA 요소: 매칭 구간 등록 및 초기 하이라이트 클래스/아웃라인 적용
+                const inputEl = item.node;
+                if (inputEl.dataset.searchExtOrigOutline === undefined) {
+                    inputEl.dataset.searchExtOrigOutline = inputEl.style.outline || '';
+                    inputEl.dataset.searchExtOrigOutlineOffset = inputEl.style.outlineOffset || '';
+                }
+                inputEl.classList.add('search-ext-input-highlight');
+                const firstBar = nonOverlapping[0].bar;
+                inputEl.style.outline = `2px solid ${firstBar.colorConfig.highlight}`;
+                inputEl.style.outlineOffset = '-1px';
 
-                curIdx = item.end;
-            }
-
-            // 마지막 잔여 텍스트 노드 추가
-            if (curIdx < text.length) {
-                frag.appendChild(document.createTextNode(text.substring(curIdx)));
-            }
-
-            const parent = textNode.parentNode;
-            if (parent) {
-                parent.replaceChild(frag, textNode);
+                for (const interval of nonOverlapping) {
+                    if (interval.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
+                    interval.bar.matches.push({
+                        type: 'input',
+                        element: inputEl,
+                        start: interval.start,
+                        end: interval.end,
+                        bar: interval.bar
+                    });
+                }
             }
         });
 
@@ -1856,6 +2001,11 @@
                 updateCountDisplay(bar, 0, 0);
             }
         });
+
+        // 활성 검색바가 존재하고 매칭이 있으면 활성 바의 activeMatch를 최종 우선 적용
+        if (activeBar && activeBar.matches.length > 0) {
+            highlightActiveMatch(activeBar);
+        }
 
         // 자동 이동(Auto-Move) 옵션 활성화 시 첫 일치 항목으로 화면 스크롤
         if (triggeringBar && config.autoMove && triggeringBar.matches.length > 0) {
@@ -1893,19 +2043,57 @@
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function highlightActiveMatch(bar) {
-        bar.matches.forEach((el, i) => {
-            if (i === bar.currentIndex) {
-                // 현재 포커스된 일치 항목: 굵은 테두리와 활성 색상 적용
-                el.classList.add('search-ext-active');
-                el.style.backgroundColor = bar.colorConfig.active;
-                el.style.color = bar.colorConfig.activeText;
+        const inputMatchesMap = new Map();
+
+        bar.matches.forEach((match, i) => {
+            const isActive = (i === bar.currentIndex);
+            if (match.type === 'mark') {
+                const el = match.element;
+                if (isActive) {
+                    el.classList.add('search-ext-active');
+                    el.style.backgroundColor = bar.colorConfig.active;
+                    el.style.color = bar.colorConfig.activeText;
+                    el.style.outline = `2px solid ${bar.colorConfig.activeOutline}`;
+                } else {
+                    el.classList.remove('search-ext-active');
+                    el.style.backgroundColor = bar.colorConfig.highlight;
+                    el.style.color = bar.colorConfig.text;
+                    el.style.outline = 'none';
+                }
+            } else if (match.type === 'input') {
+                const el = match.element;
+                if (!inputMatchesMap.has(el)) {
+                    inputMatchesMap.set(el, { hasActive: false, activeMatch: null });
+                }
+                const entry = inputMatchesMap.get(el);
+                if (isActive) {
+                    entry.hasActive = true;
+                    entry.activeMatch = match;
+                }
+            }
+        });
+
+        inputMatchesMap.forEach((entry, el) => {
+            if (el.dataset.searchExtOrigOutline === undefined) {
+                el.dataset.searchExtOrigOutline = el.style.outline || '';
+                el.dataset.searchExtOrigOutlineOffset = el.style.outlineOffset || '';
+            }
+            if (entry.hasActive && entry.activeMatch) {
+                el.classList.add('search-ext-input-active');
+                el.classList.remove('search-ext-input-highlight');
                 el.style.outline = `2px solid ${bar.colorConfig.activeOutline}`;
+                el.style.outlineOffset = '-1px';
+                try {
+                    el.focus({ preventScroll: true });
+                    if (typeof el.setSelectionRange === 'function') {
+                        el.setSelectionRange(entry.activeMatch.start, entry.activeMatch.end);
+                    }
+                } catch (e) {}
             } else {
-                // 일반 일치 항목: 기본 하이라이트 색상 적용
-                el.classList.remove('search-ext-active');
-                el.style.backgroundColor = bar.colorConfig.highlight;
-                el.style.color = bar.colorConfig.text;
-                el.style.outline = 'none';
+                el.classList.remove('search-ext-input-active');
+                el.classList.add('search-ext-input-highlight');
+                el.style.outline = `2px solid ${bar.colorConfig.highlight}`;
+                el.style.outlineOffset = '-1px';
             }
         });
     }
@@ -1917,7 +2105,9 @@
     //------------------------------------------------------------------------------------------------------
     function scrollToCurrentMatch(bar) {
         if (bar.currentIndex < 0 || bar.currentIndex >= bar.matches.length) return;
-        const target = bar.matches[bar.currentIndex];
+        const match = bar.matches[bar.currentIndex];
+        if (!match) return;
+        const target = match.element;
         if (!target) return;
 
         // 접힌 <details> 내부에 위치한 경우 상위 요소를 모두 펼쳐야 화면에 노출됨
@@ -1972,6 +2162,20 @@
         if (domObserver) { domObserver.disconnect(); domObserver = null; }
         clearTimeout(domObserverTimer);
     }
+
+    // 사용자가 웹페이지 내 input/textarea 폼 값을 직접 입력/수정할 때도 실시간 동기화 재검색
+    window.addEventListener('input', (e) => {
+        if (!isBarVisible || isHighlighting) return;
+        if (!bars.some(b => b.query && b.query.trim())) return;
+        const target = e.target;
+        if (target && isSearchableInputElement(target)) {
+            if (target.classList.contains('search-input')) return;
+            clearTimeout(domObserverTimer);
+            domObserverTimer = setTimeout(() => {
+                if (!isHighlighting && isBarVisible) performAllSearches(null);
+            }, DOM_OBSERVER_DELAY);
+        }
+    }, true);
 
 // ## 단계 900: 키보드 내비게이션 및 전역 단축키 핸들러
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

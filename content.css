@@ -11,3 +11,11 @@ mark.search-ext-highlight {
 mark.search-ext-highlight.search-ext-active {
     font-weight: bold !important;
 }
+
+.search-ext-input-highlight {
+    transition: outline-color 0.15s ease !important;
+}
+
+.search-ext-input-active {
+    transition: outline-color 0.15s ease !important;
+}

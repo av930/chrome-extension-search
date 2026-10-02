@@ -8,13 +8,12 @@
 loading이 완료되면, 표기된 "로딩완료후 검색이 가능" 메세지를 제거
 
 
-4. 검색 keyword를 입력하는 동안(focus가 된동안)에는 입력된 글자가 검색바에만 전달되고 다른쪽에는 더이상 전달되지 않도록 해줘. 
-  현재는 devA를 검색하는 경우 A글자에 해당하는 shift+A key를 다른 extension이 hooking하여 작업을 진행하고 있어.
-  >>> 제대로 적용 안됨. devA를 누르면 jenkins plugin기능이 동작함
+4. 검현재 검색바에 devA를 입력하는 경우 A를 입력하는 시점에 (shift+a key 입력으로) 다른 extension이 key를 hooking하여 엉뚱한 작업을 진행하고 있어.
+검색 keyword 입력중(즉, editbox에 focus가 된 경우에는) 오로지 검색박스안에서 key처리가 되도록 한정해줘.
+  
 
 
 5. 빨간색 영역에 extension version을 날짜로 표시해줘.  
 version은 ex 261003.1432와 같이 분단위로 표기시되어야 해.
-
 market place로 부터 update된 경우면 공식 vesion을 사용해주고
 market place로 부터 update가 된것이 아니라 local package등으로 update되었을때는 extension이 browser에 load된 시각을 대신 표시해줘.

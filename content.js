@@ -281,8 +281,15 @@
 
     // 다른 탭이나 팝업에서 변경된 스토리지 이벤트를 실시간 감지하여 반영
     chrome.storage.onChanged.addListener((changes, areaName) => {
-        // 북마크 변경(로컬 스토리지) 실시간 동기화
+        // 로컬 스토리지 동기화 (북마크 및 패키지 로드 시각)
         if (areaName === 'local') {
+            if (changes.packageLoadTime && shadowRoot) {
+                const versionTag = shadowRoot.getElementById('extensionVersionTag');
+                if (versionTag) {
+                    versionTag.textContent = `ver ${changes.packageLoadTime.newValue}`;
+                    versionTag.title = `Local Package Loaded: ${changes.packageLoadTime.newValue}`;
+                }
+            }
             if (changes.bookmarks) {
                 bookmarks = changes.bookmarks.newValue || [];
                 if (isBarVisible) {
@@ -311,6 +318,53 @@
         if (changes.lastBarsState) config.lastBarsState = changes.lastBarsState.newValue;
         if (changes.ignoreDelimiters) config.ignoreDelimiters = changes.ignoreDelimiters.newValue;
     });
+
+// ## 단계 250: 확장 프로그램 버전 및 패키지 로드 시각 관리
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //------------------------------------------------------------------------------------------------------
+    // Date 객체를 YYMMDD.HHmm 형식(예: 261003.1432)의 버전 문자열로 변환한다.
+    // 입력: date - Date 객체 (기본값: 현재 시각)
+    // 출력: "YYMMDD.HHmm" 형태의 포맷팅된 문자열
+    //------------------------------------------------------------------------------------------------------
+    function formatPackageLoadTime(date = new Date()) {
+        const yy = String(date.getFullYear()).slice(-2);
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const hh = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        return `${yy}${mm}${dd}.${hh}${min}`;
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 확장 프로그램 버전을 비동기 조회한다.
+    // 마켓플레이스로부터 업데이트된 경우 manifest.version을 반환하고,
+    // 로컬 패키지로 로드된 경우 브라우저에 패키지가 로드된 시각(YYMMDD.HHmm)을 반환한다.
+    // 입력: callback - (versionStr, isStore) 콜백 함수
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function getDisplayVersion(callback) {
+        const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
+        const isFromStore = Boolean(manifest.update_url && manifest.update_url.includes('google.com'));
+
+        if (isFromStore && manifest.version) {
+            callback(manifest.version, true);
+            return;
+        }
+
+        if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.get(['packageLoadTime'], (result) => {
+                if (result && result.packageLoadTime) {
+                    callback(result.packageLoadTime, false);
+                } else {
+                    const nowStr = formatPackageLoadTime(new Date());
+                    chrome.storage.local.set({ packageLoadTime: nowStr });
+                    callback(nowStr, false);
+                }
+            });
+        } else {
+            callback(formatPackageLoadTime(new Date()), false);
+        }
+    }
 
 // ## 단계 300: Shadow DOM 기반 검색 UI 루트 컨테이너 및 공통 바 생성
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -665,9 +719,29 @@
             }
             .common-left-group {
                 display: flex;
-                align-items: center;
+                flex-direction: column;
+                align-items: flex-start;
                 gap: 2px;
                 flex-shrink: 0;
+            }
+            .extension-version-tag {
+                position: relative;
+                top: -3px;
+                font-size: 9px;
+                font-weight: 600;
+                color: #94a3b8;
+                letter-spacing: 0.5px;
+                line-height: 1;
+                padding: 0;
+                user-select: text;
+                cursor: default;
+                text-align: left;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            }
+            .text-select-row {
+                display: flex;
+                align-items: center;
+                gap: 0;
             }
             .btn-thick-nav {
                 background: transparent;
@@ -779,34 +853,46 @@
         commonBar.className = 'common-bar';
         commonBar.innerHTML = `
             <div class="common-left-group">
-                <button type="button" class="btn-thick-nav btn-fast-prev" title="선택 영역 왼쪽 3단어 확장 (Expand selection 3 words left)">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M19 6L14 12L19 18 M14 6L9 12L14 18 M9 6L4 12L9 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-                <button type="button" class="btn-thick-nav btn-thick-prev" title="선택 영역 왼쪽 1단어 확장 (Expand selection 1 word left)">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M15 5L8 12L15 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-                <button type="button" class="btn-text-select" title="현재 선택된 텍스트 클립보드로 복사 (Copy selected text)">
-                    text select
-                </button>
-                <button type="button" class="btn-thick-nav btn-thick-next" title="선택 영역 오른쪽 1단어 확장 (Expand selection 1 word right)">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M9 5L16 12L9 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-                <button type="button" class="btn-thick-nav btn-fast-next" title="선택 영역 오른쪽 3단어 확장 (Expand selection 3 words right)">
-                    <svg viewBox="0 0 24 24">
-                        <path d="M5 6L10 12L5 18 M10 6L15 12L10 18 M15 6L20 12L15 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
+                <div class="extension-version-tag" id="extensionVersionTag" title="Extension Version">--</div>
+                <div class="text-select-row">
+                    <button type="button" class="btn-thick-nav btn-fast-prev" title="선택 영역 왼쪽 3단어 확장 (Expand selection 3 words left)">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M19 6L14 12L19 18 M14 6L9 12L14 18 M9 6L4 12L9 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="btn-thick-nav btn-thick-prev" title="선택 영역 왼쪽 1단어 확장 (Expand selection 1 word left)">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M15 5L8 12L15 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="btn-text-select" title="현재 선택된 텍스트 클립보드로 복사 (Copy selected text)">
+                        text select
+                    </button>
+                    <button type="button" class="btn-thick-nav btn-thick-next" title="선택 영역 오른쪽 1단어 확장 (Expand selection 1 word right)">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M9 5L16 12L9 19" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="btn-thick-nav btn-fast-next" title="선택 영역 오른쪽 3단어 확장 (Expand selection 3 words right)">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M5 6L10 12L5 18 M10 6L15 12L10 18 M15 6L20 12L15 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div class="common-right-group bookmarks-bar"></div>
         `;
 
         bookmarksContainer = commonBar.querySelector('.bookmarks-bar');
+
+        // 확장 프로그램 버전 또는 로컬 패키지 로드 시각 표시
+        const versionTag = commonBar.querySelector('#extensionVersionTag');
+        if (versionTag) {
+            getDisplayVersion((ver, isStore) => {
+                versionTag.textContent = `ver ${ver}`;
+                versionTag.title = isStore ? `Marketplace Version: ${ver}` : `Local Package Loaded: ${ver}`;
+            });
+        }
 
         // Attach event listeners for common bar buttons
         const btnFastPrev = commonBar.querySelector('.btn-fast-prev');

@@ -118,6 +118,53 @@
         return BOOKMARK_COLORS[Math.floor(Math.random() * BOOKMARK_COLORS.length)];
     }
 
+// ## 단계 110: 페이지 로딩 감지 및 검색 제한 상태 관리
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // 최소 증분 검색 글자 수 및 로딩 중 안내 메시지 상수
+    const MIN_SEARCH_LENGTH = 3;
+    const LOADING_NOTICE_TEXT = '페이지 로딩완료후 검색 가능';
+    let isPageLoading = (document.readyState !== 'complete');
+
+    //------------------------------------------------------------------------------------------------------
+    // 페이지 로딩 완료 시 호출되어 로딩 상태 플래그를 해제하고 안내 문구를 제거한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function handlePageLoaded() {
+        if (!isPageLoading) return;
+        isPageLoading = false;
+        clearLoadingNoticeFromAllBars();
+    }
+
+    // 대용량 페이지 로딩 완료 이벤트 감시 (load 및 readystatechange 대응)
+    if (isPageLoading) {
+        window.addEventListener('load', handlePageLoaded, { once: true });
+        document.addEventListener('readystatechange', () => {
+            if (document.readyState === 'complete') {
+                handlePageLoaded();
+            }
+        });
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 로딩 완료 후 모든 검색바에서 로딩 안내 메시지를 제거하고 입력 상태를 초기화한다.
+    // 입력: 없음
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function clearLoadingNoticeFromAllBars() {
+        bars.forEach(bar => {
+            if (bar.isLoadingNotice || (bar.ui && bar.ui.input && bar.ui.input.value === LOADING_NOTICE_TEXT)) {
+                bar.isLoadingNotice = false;
+                bar.ui.input.value = '';
+                bar.query = '';
+                bar.ui.input.classList.remove('loading-notice');
+                bar.ui.inputBox.classList.remove('loading-notice-box');
+                bar.ui.btnClear.classList.remove('visible');
+                updateCountDisplay(bar, 0, 0);
+            }
+        });
+    }
+
 // ## 단계 200: 스토리지 데이터 동기화 및 영구 저장 관리
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     //------------------------------------------------------------------------------------------------------
@@ -396,6 +443,9 @@
             .input-box.invalid {
                 border-color: #f38688 !important;
             }
+            .input-box.loading-notice-box {
+                border-color: #f59e0b !important;
+            }
             .search-input {
                 background: transparent;
                 border: none;
@@ -405,6 +455,11 @@
                 width: 115px;
                 min-width: 60px;
                 font-family: inherit;
+            }
+            .search-input.loading-notice {
+                color: #f59e0b !important;
+                width: 160px !important;
+                font-size: 11px !important;
             }
             .search-input::placeholder {
                 color: #5c6072;
@@ -881,6 +936,7 @@
             useRegex: initialRegex,
             matches: [],
             currentIndex: -1,
+            isLoadingNotice: false,
             ui: {
                 btnAdd: row.querySelector('.btn-add'),
                 inputBox: row.querySelector('.input-box'),
@@ -922,15 +978,50 @@
 
         // 입력값 변경 시 실시간 증분 검색 트리거 (디바운스로 고속 타이핑 렉 및 스토리지 쿼터 초과 방지)
         bar.ui.input.addEventListener('input', (e) => {
+            // 페이지 로딩 중일 경우 사용자 입력 대신 안내 문구를 표기하고 검색 중단
+            if (isPageLoading) {
+                bar.isLoadingNotice = true;
+                bar.ui.input.value = LOADING_NOTICE_TEXT;
+                bar.query = '';
+                bar.ui.input.classList.add('loading-notice');
+                bar.ui.inputBox.classList.add('loading-notice-box');
+                bar.ui.btnClear.classList.remove('visible');
+                updateCountDisplay(bar, 0, 0);
+                return;
+            }
+
+            // 로딩 안내 상태에서 새 입력 시 안내 클래스 제거
+            if (bar.isLoadingNotice) {
+                bar.isLoadingNotice = false;
+                bar.ui.input.classList.remove('loading-notice');
+                bar.ui.inputBox.classList.remove('loading-notice-box');
+            }
+
             bar.query = e.target.value;
             bar.ui.btnClear.classList.toggle('visible', !!bar.query);
-            debouncedPerformAllSearches(bar, 80);
+
+            // 3글자 이상부터 증분 검색(incremental search) 수행
+            const raw = bar.useRegex ? bar.query : bar.query.trim();
+            if (raw.length < MIN_SEARCH_LENGTH) {
+                if (bar.matches.length > 0) {
+                    debouncedPerformAllSearches(bar, 80);
+                } else {
+                    bar.matches = [];
+                    bar.currentIndex = -1;
+                    updateCountDisplay(bar, 0, 0);
+                }
+            } else {
+                debouncedPerformAllSearches(bar, 80);
+            }
             debouncedSaveBarsState(400);
         });
 
         // 지우기(✕) 버튼 클릭 시 입력값 즉시 초기화
         bar.ui.btnClear.addEventListener('click', () => {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            bar.isLoadingNotice = false;
+            bar.ui.input.classList.remove('loading-notice');
+            bar.ui.inputBox.classList.remove('loading-notice-box');
             bar.query = '';
             bar.ui.input.value = '';
             bar.ui.btnClear.classList.remove('visible');
@@ -941,8 +1032,26 @@
 
         // 인풋 내 키보드 내비게이션(Enter, Shift+Enter, ESC, F3, F4)
         bar.ui.input.addEventListener('keydown', (e) => {
+            // 로딩 중에는 ESC(닫기), Tab을 제외한 입력을 차단하고 안내 메시지 유지
+            if (isPageLoading) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    removeSearchBar(bar);
+                    return;
+                }
+                if (e.key === 'Tab') return;
+                e.preventDefault();
+                bar.isLoadingNotice = true;
+                bar.ui.input.value = LOADING_NOTICE_TEXT;
+                bar.ui.input.classList.add('loading-notice');
+                bar.ui.inputBox.classList.add('loading-notice-box');
+                return;
+            }
+
+            const raw = bar.useRegex ? bar.query : bar.query.trim();
             if (e.key === 'Enter') {
                 e.preventDefault();
+                if (raw.length < MIN_SEARCH_LENGTH) return;
                 // 엔터 입력 시 대기 중인 디바운스 즉시 실행 보장
                 if (searchDebounceTimer) {
                     clearTimeout(searchDebounceTimer);
@@ -954,9 +1063,11 @@
                 removeSearchBar(bar);
             } else if (e.key === 'F3') {
                 e.preventDefault();
+                if (raw.length < MIN_SEARCH_LENGTH) return;
                 e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
             } else if (e.key === 'F4') {
                 e.preventDefault();
+                if (raw.length < MIN_SEARCH_LENGTH) return;
                 moveToPrev(bar);
             }
         });
@@ -1450,9 +1561,16 @@
                     const isFirst = (idx === 0);
                     const bar = createSearchBar(state, isFirst);
                     if (isFirst && initialQuery) {
-                        bar.query = initialQuery;
-                        bar.ui.input.value = initialQuery;
-                        bar.ui.btnClear.classList.add('visible');
+                        if (isPageLoading) {
+                            bar.isLoadingNotice = true;
+                            bar.ui.input.value = LOADING_NOTICE_TEXT;
+                            bar.ui.input.classList.add('loading-notice');
+                            bar.ui.inputBox.classList.add('loading-notice-box');
+                        } else {
+                            bar.query = initialQuery;
+                            bar.ui.input.value = initialQuery;
+                            bar.ui.btnClear.classList.add('visible');
+                        }
                     }
                 });
 
@@ -1470,10 +1588,17 @@
                 const targetBar = activeBar || bars[0];
                 setActiveBar(targetBar);
                 if (initialQuery) {
-                    targetBar.query = initialQuery;
-                    targetBar.ui.input.value = initialQuery;
-                    targetBar.ui.btnClear.classList.add('visible');
-                    performAllSearches(targetBar);
+                    if (isPageLoading) {
+                        targetBar.isLoadingNotice = true;
+                        targetBar.ui.input.value = LOADING_NOTICE_TEXT;
+                        targetBar.ui.input.classList.add('loading-notice');
+                        targetBar.ui.inputBox.classList.add('loading-notice-box');
+                    } else {
+                        targetBar.query = initialQuery;
+                        targetBar.ui.input.value = initialQuery;
+                        targetBar.ui.btnClear.classList.add('visible');
+                        performAllSearches(targetBar);
+                    }
                 }
                 targetBar.ui.input.focus();
                 targetBar.ui.input.select();
@@ -1659,8 +1784,8 @@
         }
     }
 
-    // 검색바당 최대 렌더링 가능한 하이라이트 노드 상한선 (브라우저 메모리 고갈 및 탭 프리징 방지)
-    const MAX_MATCHES_PER_BAR = 1500;
+    // 검색바당 최대 렌더링 가능한 하이라이트 노드 상한선 (1000개 도달 시 검색 즉시 중지 및 브라우저 프리징 방지)
+    const MAX_MATCHES_PER_BAR = 1000;
 
     // Shadow DOM / iframe 중첩 탐색 시 무한 재귀 및 과도한 순회를 막는 깊이 제한
     const MAX_ROOT_DEPTH = 12;
@@ -1743,11 +1868,16 @@
         const searchRoots = collectSearchRoots();
         cleanAllHighlights(searchRoots);
 
-        // 유효한 검색 패턴이 있는 검색바들만 선별 및 사전 최적화 데이터 캐싱
+        // 유효한 검색 패턴이 있는 검색바들만 선별 (3글자 이상만 증분 검색 허용)
         const activeSearchBars = [];
         bars.forEach(bar => {
             const raw = bar.useRegex ? bar.query : bar.query.trim();
-            if (!raw) return;
+            if (!raw || raw.length < MIN_SEARCH_LENGTH) {
+                bar.matches = [];
+                bar.currentIndex = -1;
+                updateCountDisplay(bar, 0, 0);
+                return;
+            }
             const regex = compileBarRegex(bar);
             if (regex) {
                 activeSearchBars.push({
@@ -1765,6 +1895,9 @@
             releaseHighlightingFlag();
             return;
         }
+
+        // 모든 활성 검색바가 매치 상한(1000개)에 도달했는지 확인하는 검사 함수
+        const areAllBarsFull = () => activeSearchBars.every(item => item.bar.matches.length >= MAX_MATCHES_PER_BAR);
 
         // 텍스트 노드 및 검색 가능한 폼 입력 필드(input, textarea)를 아우르는 복합 필터
         const combinedFilter = {
@@ -1839,12 +1972,13 @@
             }
         };
 
-        // 본문 + Shadow DOM + 동일 출처 iframe을 모두 포함한 검색 루트 재사용
+        // 본문 + Shadow DOM + 동일 출처 iframe을 모두 포함한 검색 루트 순회
         const visibilityCache = new Map();
         const nodesToProcess = [];
 
         // 각 루트별로 텍스트 노드 및 input 요소를 순회하며 검색 패턴 부합 노드 수집
-        searchRoots.forEach(root => {
+        for (const root of searchRoots) {
+            if (nodesToProcess.length >= 1500 || areAllBarsFull()) break;
             const walker = document.createTreeWalker(
                 root,
                 NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
@@ -1853,6 +1987,7 @@
             let currentNode = walker.nextNode();
 
             while (currentNode) {
+                if (nodesToProcess.length >= 1500 || areAllBarsFull()) break;
                 const isText = (currentNode.nodeType === Node.TEXT_NODE);
                 const val = isText ? currentNode.nodeValue : (currentNode.value || currentNode.placeholder || '');
                 let matched = false;
@@ -1881,14 +2016,16 @@
                 }
                 currentNode = walker.nextNode();
             }
-        });
+        }
 
-        // 각 노드별 일치 구간 계산 및 하이라이트/매치 등록
-        nodesToProcess.forEach(item => {
+        // 각 노드별 일치 구간 계산 및 하이라이트/매치 등록 (1000개 도달 시 즉시 중지)
+        for (const item of nodesToProcess) {
+            if (areAllBarsFull()) break;
+
             const text = item.text;
             const intervals = [];
 
-            // 각 검색바별 일치 구간 계산 (한도 초과된 바는 매칭 생성 제외)
+            // 각 검색바별 일치 구간 계산 (1000개 도달한 검색바는 제외)
             activeSearchBars.forEach(({ bar, regex }) => {
                 if (bar.matches.length >= MAX_MATCHES_PER_BAR) return;
                 regex.lastIndex = 0;
@@ -1906,10 +2043,13 @@
                         end: match.index + len,
                         bar: bar
                     });
+                    if (bar.matches.length + intervals.filter(iv => iv.bar === bar).length >= MAX_MATCHES_PER_BAR) {
+                        break;
+                    }
                 }
             });
 
-            if (intervals.length === 0) return;
+            if (intervals.length === 0) continue;
 
             // 시작 위치 오름차순, 길이 내림차순 정렬
             intervals.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
@@ -1918,11 +2058,14 @@
             const nonOverlapping = [];
             let lastEnd = 0;
             for (const interval of intervals) {
+                if (interval.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
                 if (interval.start >= lastEnd) {
                     nonOverlapping.push(interval);
                     lastEnd = interval.end;
                 }
             }
+
+            if (nonOverlapping.length === 0) continue;
 
             if (item.isText) {
                 // DocumentFragment를 이용해 노드 일괄 교체
@@ -1930,6 +2073,8 @@
                 let curIdx = 0;
 
                 for (const interval of nonOverlapping) {
+                    if (interval.bar.matches.length >= MAX_MATCHES_PER_BAR) continue;
+
                     // 매칭 이전 일반 텍스트 노드 추가
                     if (interval.start > curIdx) {
                         frag.appendChild(document.createTextNode(text.substring(curIdx, interval.start)));
@@ -1984,17 +2129,16 @@
                     });
                 }
             }
-        });
+        }
 
-        // 각 검색바의 일치 건수 표시 및 첫 번째 일치 항목 활성화
+        // 각 검색바의 일치 건수 표시 및 첫 번째 일치 항목 활성화 (1000개 제한 시 완료 표시)
         bars.forEach(bar => {
             const total = bar.matches.length;
             if (total > 0) {
                 if (bar.currentIndex < 0 || bar.currentIndex >= total) {
                     bar.currentIndex = 0;
                 }
-                const totalDisplay = total >= MAX_MATCHES_PER_BAR ? `${MAX_MATCHES_PER_BAR}+` : total;
-                updateCountDisplay(bar, bar.currentIndex + 1, totalDisplay);
+                updateCountDisplay(bar, bar.currentIndex + 1, total);
                 highlightActiveMatch(bar);
             } else {
                 bar.currentIndex = -1;

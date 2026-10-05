@@ -1,4 +1,4 @@
-﻿// ==========================================================================================================
+// ==========================================================================================================
 // content.js - In-page text search script with multiple search bars, distinct highlight colors, and navigation
 // 웹 페이지 본문에 삽입되어 다중 검색바 오버레이, 실시간 증분 하이라이트, 북마크 및 텍스트 선택 확장을 수행하는 스크립트.
 // ==========================================================================================================
@@ -1022,6 +1022,7 @@
             useRegex: initialRegex,
             matches: [],
             currentIndex: -1,
+            forceSearch: false,
             isLoadingNotice: false,
             ui: {
                 btnAdd: row.querySelector('.btn-add'),
@@ -1069,6 +1070,7 @@
                 bar.isLoadingNotice = true;
                 bar.ui.input.value = LOADING_NOTICE_TEXT;
                 bar.query = '';
+                bar.forceSearch = false;
                 bar.ui.input.classList.add('loading-notice');
                 bar.ui.inputBox.classList.add('loading-notice-box');
                 bar.ui.btnClear.classList.remove('visible');
@@ -1084,6 +1086,7 @@
             }
 
             bar.query = e.target.value;
+            bar.forceSearch = false;
             bar.ui.btnClear.classList.toggle('visible', !!bar.query);
 
             // 3글자 이상부터 증분 검색(incremental search) 수행
@@ -1106,6 +1109,7 @@
         bar.ui.btnClear.addEventListener('click', () => {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             bar.isLoadingNotice = false;
+            bar.forceSearch = false;
             bar.ui.input.classList.remove('loading-notice');
             bar.ui.inputBox.classList.remove('loading-notice-box');
             bar.query = '';
@@ -1137,23 +1141,46 @@
             const raw = bar.useRegex ? bar.query : bar.query.trim();
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (raw.length < MIN_SEARCH_LENGTH) return;
-                // 엔터 입력 시 대기 중인 디바운스 즉시 실행 보장
+                if (!raw) return;
+
+                const hadTimer = !!searchDebounceTimer;
                 if (searchDebounceTimer) {
                     clearTimeout(searchDebounceTimer);
-                    performAllSearches(bar);
+                    searchDebounceTimer = null;
                 }
+
+                // 3글자 미만이어서 증분 검색되지 않은 상태인 경우 엔터로 강제 검색 실행
+                const isUnderMinLength = raw.length < MIN_SEARCH_LENGTH;
+                if (isUnderMinLength && !bar.forceSearch) {
+                    bar.forceSearch = true;
+                    performAllSearches(bar);
+                    if (bar.matches.length > 0) {
+                        scrollToCurrentMatch(bar);
+                    }
+                    return;
+                }
+
+                // 디바운스 대기 중이었거나 아직 매칭 결과가 없다면 검색 먼저 실행
+                if (hadTimer || bar.matches.length === 0) {
+                    performAllSearches(bar);
+                    if (bar.matches.length > 0) {
+                        scrollToCurrentMatch(bar);
+                    }
+                    return;
+                }
+
+                // 이미 검색 결과가 존재하면 다음/이전 일치 항목으로 순환 이동
                 e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
             } else if (e.key === 'Escape') {
                 e.preventDefault();
                 removeSearchBar(bar);
             } else if (e.key === 'F3') {
                 e.preventDefault();
-                if (raw.length < MIN_SEARCH_LENGTH) return;
+                if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
                 e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
             } else if (e.key === 'F4') {
                 e.preventDefault();
-                if (raw.length < MIN_SEARCH_LENGTH) return;
+                if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
                 moveToPrev(bar);
             }
         });
@@ -1213,6 +1240,7 @@
         }
 
         if (initialQuery) {
+            bar.forceSearch = true;
             performAllSearches(bar);
         }
 
@@ -1655,6 +1683,7 @@
                         } else {
                             bar.query = initialQuery;
                             bar.ui.input.value = initialQuery;
+                            bar.forceSearch = true;
                             bar.ui.btnClear.classList.add('visible');
                         }
                     }
@@ -1682,6 +1711,7 @@
                     } else {
                         targetBar.query = initialQuery;
                         targetBar.ui.input.value = initialQuery;
+                        targetBar.forceSearch = true;
                         targetBar.ui.btnClear.classList.add('visible');
                         performAllSearches(targetBar);
                     }
@@ -1921,6 +1951,7 @@
     // 출력: 검색 대상 여부 (true/false)
     //------------------------------------------------------------------------------------------------------
     function isVisibleForSearch(el, cache) {
+        if (!el) return false;
         const cached = cache.get(el);
         if (cached !== undefined) return cached;
 
@@ -1954,11 +1985,11 @@
         const searchRoots = collectSearchRoots();
         cleanAllHighlights(searchRoots);
 
-        // 유효한 검색 패턴이 있는 검색바들만 선별 (3글자 이상만 증분 검색 허용)
+        // 유효한 검색 패턴이 있는 검색바들만 선별 (3글자 이상만 증분 검색 허용, 엔터 강제 검색 시 예외)
         const activeSearchBars = [];
         bars.forEach(bar => {
             const raw = bar.useRegex ? bar.query : bar.query.trim();
-            if (!raw || raw.length < MIN_SEARCH_LENGTH) {
+            if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) {
                 bar.matches = [];
                 bar.currentIndex = -1;
                 updateCountDisplay(bar, 0, 0);

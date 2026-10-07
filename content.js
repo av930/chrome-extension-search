@@ -1120,71 +1120,6 @@
             saveBarsState();
         });
 
-        // 인풋 내 키보드 내비게이션(Enter, Shift+Enter, ESC, F3, F4)
-        bar.ui.input.addEventListener('keydown', (e) => {
-            // 로딩 중에는 ESC(닫기), Tab을 제외한 입력을 차단하고 안내 메시지 유지
-            if (isPageLoading) {
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    removeSearchBar(bar);
-                    return;
-                }
-                if (e.key === 'Tab') return;
-                e.preventDefault();
-                bar.isLoadingNotice = true;
-                bar.ui.input.value = LOADING_NOTICE_TEXT;
-                bar.ui.input.classList.add('loading-notice');
-                bar.ui.inputBox.classList.add('loading-notice-box');
-                return;
-            }
-
-            const raw = bar.useRegex ? bar.query : bar.query.trim();
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                if (!raw) return;
-
-                const hadTimer = !!searchDebounceTimer;
-                if (searchDebounceTimer) {
-                    clearTimeout(searchDebounceTimer);
-                    searchDebounceTimer = null;
-                }
-
-                // 3글자 미만이어서 증분 검색되지 않은 상태인 경우 엔터로 강제 검색 실행
-                const isUnderMinLength = raw.length < MIN_SEARCH_LENGTH;
-                if (isUnderMinLength && !bar.forceSearch) {
-                    bar.forceSearch = true;
-                    performAllSearches(bar);
-                    if (bar.matches.length > 0) {
-                        scrollToCurrentMatch(bar);
-                    }
-                    return;
-                }
-
-                // 디바운스 대기 중이었거나 아직 매칭 결과가 없다면 검색 먼저 실행
-                if (hadTimer || bar.matches.length === 0) {
-                    performAllSearches(bar);
-                    if (bar.matches.length > 0) {
-                        scrollToCurrentMatch(bar);
-                    }
-                    return;
-                }
-
-                // 이미 검색 결과가 존재하면 다음/이전 일치 항목으로 순환 이동
-                e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                removeSearchBar(bar);
-            } else if (e.key === 'F3') {
-                e.preventDefault();
-                if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
-                e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
-            } else if (e.key === 'F4') {
-                e.preventDefault();
-                if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
-                moveToPrev(bar);
-            }
-        });
-
         // 이전/다음 화살표 클릭 핸들러
         bar.ui.btnNext.addEventListener('click', () => moveToNext(bar));
         bar.ui.btnPrev.addEventListener('click', () => moveToPrev(bar));
@@ -2494,8 +2429,84 @@
         return keyMatch && ctrlMatch && altMatch && shiftMatch && metaMatch;
     }
 
+    function getSearchBarFromKeyEvent(e) {
+        const input = e.composedPath().find(node =>
+            node instanceof HTMLInputElement && node.classList.contains('search-input')
+        );
+        return input ? bars.find(bar => bar.ui.input === input) : null;
+    }
+
+    function handleSearchInputKeydown(e, bar) {
+        if (isPageLoading) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                removeSearchBar(bar);
+                return;
+            }
+            if (e.key === 'Tab') return;
+            e.preventDefault();
+            bar.isLoadingNotice = true;
+            bar.ui.input.value = LOADING_NOTICE_TEXT;
+            bar.ui.input.classList.add('loading-notice');
+            bar.ui.inputBox.classList.add('loading-notice-box');
+            return;
+        }
+
+        const raw = bar.useRegex ? bar.query : bar.query.trim();
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (!raw) return;
+
+            const hadTimer = !!searchDebounceTimer;
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = null;
+            }
+
+            const isUnderMinLength = raw.length < MIN_SEARCH_LENGTH;
+            if (isUnderMinLength && !bar.forceSearch) {
+                bar.forceSearch = true;
+                performAllSearches(bar);
+                if (bar.matches.length > 0) scrollToCurrentMatch(bar);
+                return;
+            }
+
+            if (hadTimer || bar.matches.length === 0) {
+                performAllSearches(bar);
+                if (bar.matches.length > 0) scrollToCurrentMatch(bar);
+                return;
+            }
+
+            e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            removeSearchBar(bar);
+        } else if (e.key === 'F3') {
+            e.preventDefault();
+            if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
+            e.shiftKey ? moveToPrev(bar) : moveToNext(bar);
+        } else if (e.key === 'F4') {
+            e.preventDefault();
+            if (!raw || (!bar.forceSearch && raw.length < MIN_SEARCH_LENGTH)) return;
+            moveToPrev(bar);
+        }
+    }
+
+    ['keypress', 'keyup'].forEach(eventType => {
+        window.addEventListener(eventType, e => {
+            if (getSearchBarFromKeyEvent(e)) e.stopImmediatePropagation();
+        }, true);
+    });
+
     // 웹페이지 전역 키보드 단축키 및 F3/F4 탐색 이벤트 리스너
     window.addEventListener('keydown', (e) => {
+        const inputBar = getSearchBarFromKeyEvent(e);
+        if (inputBar) {
+            handleSearchInputKeydown(e, inputBar);
+            e.stopImmediatePropagation();
+            return;
+        }
+
         // 커스텀 검색 호출 단축키 (기본: Ctrl+F)
         if (matchesShortcut(e, config.shortcut)) {
             e.preventDefault();

@@ -8,6 +8,7 @@
 const DEFAULT_CONFIG = {
     shortcut: { ctrl: true, alt: false, shift: false, meta: false, key: 'f' },
     autoMove: true,
+    showDashboard: false,
     defaultBarCount: 2,
     highlightColor: '#ffe600',
     activeHighlightColor: '#ff8f00',
@@ -71,6 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const recordShortcutBtn = document.getElementById('recordShortcutBtn');
     const resetShortcutBtn = document.getElementById('resetShortcutBtn');
     const defaultBarCountInput = document.getElementById('defaultBarCount');
+    const showDashboardToggle = document.getElementById('showDashboardToggle');
     const autoMoveToggle = document.getElementById('autoMoveToggle');
     const ignoreDelimitersInput = document.getElementById('ignoreDelimiters');
     const highlightColorInput = document.getElementById('highlightColor');
@@ -80,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.sync.get([
         'shortcut',
         'autoMove',
+        'showDashboard',
         'defaultBarCount',
         'highlightColor',
         'activeHighlightColor',
@@ -90,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentShortcut = { ...result.shortcut };
         }
         shortcutDisplay.value = formatShortcutString(currentShortcut);
+        showDashboardToggle.checked = result.showDashboard === true;
 
         // 기본 검색바 개수 복원 (기본값: 2)
         defaultBarCountInput.value = (typeof result.defaultBarCount === 'number')
@@ -223,6 +227,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ## 단계 230: 옵션 변경 실시간 저장 이벤트
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    showDashboardToggle.addEventListener('change', () => {
+        chrome.storage.sync.set({ showDashboard: showDashboardToggle.checked }, () => {
+            showToast('대시보드 패널 표시 설정이 저장되었습니다.');
+        });
+    });
+
     // 기본 검색바 개수 변경 (1~6개 범위 제한)
     defaultBarCountInput.addEventListener('change', () => {
         let count = parseInt(defaultBarCountInput.value, 10);

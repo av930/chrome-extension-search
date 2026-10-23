@@ -78,6 +78,7 @@
         highlightColor: '#ffe600',
         activeHighlightColor: '#ff8f00',
         autoMove: true,
+        showDashboard: false,
         defaultBarCount: 2,
         lastBarsState: null,
         ignoreDelimiters: '-'
@@ -88,6 +89,7 @@
     let shadowRoot = null;
     let hostElement = null;
     let commonBar = null;
+    let dashboardTemporarilyVisible = false;
     let barsContainer = null;
     let bookmarksContainer = null;
     let bookmarks = [];
@@ -208,6 +210,7 @@
             'highlightColor',
             'activeHighlightColor',
             'autoMove',
+            'showDashboard',
             'defaultBarCount',
             'lastBarsState',
             'ignoreDelimiters'
@@ -235,10 +238,12 @@
 
             // 기타 사용자 옵션(자동 이동, 검색바 개수, 무시구분자) 동기화
             if (typeof result.autoMove === 'boolean') config.autoMove = result.autoMove;
+            config.showDashboard = result.showDashboard === true;
             if (typeof result.defaultBarCount === 'number') config.defaultBarCount = result.defaultBarCount;
             if (Array.isArray(result.lastBarsState)) config.lastBarsState = result.lastBarsState;
             if (typeof result.ignoreDelimiters === 'string') config.ignoreDelimiters = result.ignoreDelimiters;
 
+            updateDashboardVisibility();
             if (callback) callback();
         });
     }
@@ -301,6 +306,12 @@
 
         // 공통 환경설정(싱크 스토리지) 동기화
         if (areaName !== 'sync') return;
+        if (changes.showDashboard) config.showDashboard = changes.showDashboard.newValue === true;
+        if (['shortcut', 'highlightColor', 'activeHighlightColor', 'autoMove',
+            'defaultBarCount', 'ignoreDelimiters', 'showDashboard'].some(key => changes[key])) {
+            dashboardTemporarilyVisible = false;
+            updateDashboardVisibility();
+        }
         if (changes.shortcut) config.shortcut = changes.shortcut.newValue;
         if (changes.highlightColor) {
             config.highlightColor = changes.highlightColor.newValue;
@@ -374,6 +385,12 @@
     // 입력: 없음
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
+    function updateDashboardVisibility() {
+        if (commonBar) {
+            commonBar.style.display = (config.showDashboard || dashboardTemporarilyVisible) ? '' : 'none';
+        }
+    }
+
     function createUI() {
         // 이미 유효하게 DOM에 부착되어 있다면 재사용
         if (shadowRoot && hostElement && hostElement.isConnected) return;
@@ -851,6 +868,7 @@
         // Create common-bar at the top
         commonBar = document.createElement('div');
         commonBar.className = 'common-bar';
+        updateDashboardVisibility();
         commonBar.innerHTML = `
             <div class="common-left-group">
                 <div class="extension-version-tag" id="extensionVersionTag" title="Extension Version">--</div>
@@ -1246,6 +1264,8 @@
         };
 
         bookmarks.push(newBookmark);
+        dashboardTemporarilyVisible = true;
+        updateDashboardVisibility();
         saveBookmarks();
         renderBookmarks();
     }

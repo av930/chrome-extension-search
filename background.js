@@ -41,6 +41,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.storage.sync.get([
         'shortcut',
         'autoMove',
+        'showDashboard',
         'highlightColor',
         'activeHighlightColor',
         'defaultBarCount',
@@ -56,6 +57,9 @@ chrome.runtime.onInstalled.addListener((details) => {
         // 첫 번째 일치 항목 자동 스크롤 이동 기본값: true
         if (typeof result.autoMove !== 'boolean') {
             defaults.autoMove = true;
+        }
+        if (typeof result.showDashboard !== 'boolean') {
+            defaults.showDashboard = false;
         }
         // 기본 일치 하이라이트 색상: 노란색
         if (!result.highlightColor) {

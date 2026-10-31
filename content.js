@@ -89,7 +89,8 @@
     let shadowRoot = null;
     let hostElement = null;
     let commonBar = null;
-    let dashboardTemporarilyVisible = false;
+    let dashboardToggleButton = null;
+    let helpDialog = null;
     let barsContainer = null;
     let bookmarksContainer = null;
     let bookmarks = [];
@@ -292,7 +293,7 @@
                 const versionTag = shadowRoot.getElementById('extensionVersionTag');
                 if (versionTag) {
                     versionTag.textContent = `ver ${changes.packageLoadTime.newValue}`;
-                    versionTag.title = `Local Package Loaded: ${changes.packageLoadTime.newValue}`;
+                    versionTag.title = `Local Package Loaded: ${changes.packageLoadTime.newValue} - multi-search 도움말`;
                 }
             }
             if (changes.bookmarks) {
@@ -306,10 +307,8 @@
 
         // 공통 환경설정(싱크 스토리지) 동기화
         if (areaName !== 'sync') return;
-        if (changes.showDashboard) config.showDashboard = changes.showDashboard.newValue === true;
-        if (['shortcut', 'highlightColor', 'activeHighlightColor', 'autoMove',
-            'defaultBarCount', 'ignoreDelimiters', 'showDashboard'].some(key => changes[key])) {
-            dashboardTemporarilyVisible = false;
+        if (changes.showDashboard) {
+            config.showDashboard = changes.showDashboard.newValue === true;
             updateDashboardVisibility();
         }
         if (changes.shortcut) config.shortcut = changes.shortcut.newValue;
@@ -354,7 +353,18 @@
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function getDisplayVersion(callback) {
-        const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
+        if (!chrome.runtime?.id) {
+            callback('reload required', false);
+            return;
+        }
+        let manifest;
+        try {
+            manifest = chrome.runtime.getManifest();
+        } catch (error) {
+            if (!error.message.includes('Extension context invalidated')) throw error;
+            callback('reload required', false);
+            return;
+        }
         const isFromStore = Boolean(manifest.update_url && manifest.update_url.includes('google.com'));
 
         if (isFromStore && manifest.version) {
@@ -386,9 +396,145 @@
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function updateDashboardVisibility() {
+        const isVisible = config.showDashboard;
         if (commonBar) {
-            commonBar.style.display = (config.showDashboard || dashboardTemporarilyVisible) ? '' : 'none';
+            commonBar.style.display = isVisible ? '' : 'none';
         }
+        if (dashboardToggleButton) {
+            const action = isVisible ? '닫기' : '열기';
+            dashboardToggleButton.title = `대시보드 패널 ${action}`;
+            dashboardToggleButton.setAttribute('aria-label', `대시보드 패널 ${action}`);
+            dashboardToggleButton.setAttribute('aria-expanded', String(isVisible));
+        }
+    }
+
+    function setDashboardVisible(isVisible) {
+        config.showDashboard = isVisible;
+        updateDashboardVisibility();
+        if (chrome.runtime?.id) chrome.storage.sync.set({ showDashboard: isVisible });
+    }
+
+    function showHelpDialog() {
+        if (!chrome.runtime?.id) return;
+        if (!helpDialog) {
+            helpDialog = document.createElement('dialog');
+            helpDialog.className = 'help-dialog';
+            helpDialog.setAttribute('aria-labelledby', 'multiSearchHelpTitle');
+            helpDialog.innerHTML = `
+                <header class="help-header">
+                    <h2 id="multiSearchHelpTitle">multi-search 도움말</h2>
+                    <button type="button" class="help-close" aria-label="도움말 닫기" title="도움말 닫기 (Esc)">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </button>
+                    <div class="help-tabs" role="tablist" aria-label="도움말 분류">
+                        <button type="button" class="help-tab" id="helpSearchTab" role="tab" aria-selected="true" aria-controls="helpSearchPanel">search bar</button>
+                        <button type="button" class="help-tab" id="helpSettingTab" role="tab" aria-selected="false" aria-controls="helpSettingPanel" tabindex="-1">setting</button>
+                    </div>
+                </header>
+                <div class="help-body" id="helpSearchPanel" role="tabpanel" aria-labelledby="helpSearchTab" tabindex="0">
+                    <p>여러 검색어를 서로 다른 색상으로 찾고, 각 검색바에서 독립적으로 이동하는 페이지 검색 도구입니다.</p>
+                    <figure class="help-figure">
+                        <div class="help-image-scroll"><img class="help-search-image" alt="multi-search의 대시보드와 두 개의 검색바. 왼쪽부터 패널 토글, 추가, 닫기, 색상, 검색어와 건수, 이전·다음, MatchCase, ByWord, RegExp, 북마크 핀이 배치됩니다." width="730" height="155"></div>
+                        <figcaption>실제 UI 예시. 아래 항목은 검색바의 왼쪽부터 오른쪽 순서입니다.</figcaption>
+                    </figure>
+                    <section aria-labelledby="helpSearchTitle">
+                        <h3 id="helpSearchTitle">검색바 항목</h3>
+                        <ol class="help-items">
+                            <li><strong><span class="help-preview" data-controls=".btn-dashboard-toggle" aria-hidden="true" inert></span>위·아래 화살표: 대시보드</strong><p>첫 검색바 왼쪽에만 표시됩니다. 위 화살표로 열고 아래 화살표로 닫으며, 설정의 dashboard 패널표시와 동기화됩니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".btn-add" aria-hidden="true" inert></span>+: 검색바 추가</strong><p>다른 검색어를 별도의 바에서 검색합니다. 바마다 색상, 일치 옵션, 현재 위치가 독립적입니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".btn-close" aria-hidden="true" inert></span>닫기: 검색바 제거</strong><p>해당 바와 하이라이트를 제거합니다. 마지막 바를 닫으면 전체 검색창이 숨겨집니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".color-badge" aria-hidden="true" inert></span>색상 점: 하이라이트 색상</strong><p>검색어마다 고유 색상을 사용하고 현재 일치는 별도 활성 색상으로 표시합니다. 입력창을 선택하면 해당 검색바가 활성화됩니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".search-label" aria-hidden="true" inert></span>검색어 입력</strong><p>3글자부터 자동 검색합니다. 1~2글자는 Enter로 실행합니다. 페이지 로딩 중에는 검색을 기다립니다. 페이지에서 선택한 짧은 텍스트는 검색창을 열 때 자동 입력됩니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".count-info,.btn-clear" aria-hidden="true" inert></span>일치 건수 / 검색어 지우기</strong><p>현재 일치 위치와 전체 건수를 표시합니다. 입력창 안의 닫기 아이콘은 검색어와 해당 하이라이트를 지웁니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".nav-group" aria-hidden="true" inert></span>왼쪽·오른쪽 화살표: 이전·다음</strong><p>활성 검색어의 일치 위치로 스크롤합니다. 마지막과 처음 사이를 순환하며, 접힌 details 영역은 펼쳐서 보여줍니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".opt-case,.opt-word,.opt-regex" aria-hidden="true" inert></span>검색 옵션</strong><p>MatchCase는 대소문자 구분, ByWord는 단어 단위 일치, RegExp는 정규 표현식 검색입니다. 잘못된 정규식은 입력창 테두리로 표시됩니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".btn-bookmark" aria-hidden="true" inert></span>핀: 북마크 저장</strong><p>현재 페이지 URL과 검색어를 저장하고 대시보드를 엽니다. 색상 핀을 누르면 저장한 페이지와 검색어를 불러오며, 핀 아래 닫기 아이콘으로 삭제합니다.</p></li>
+                        </ol>
+                    </section>
+                    <section aria-labelledby="helpDashboardTitle">
+                        <h3 id="helpDashboardTitle">대시보드 항목</h3>
+                        <dl class="help-details">
+                            <dt><span class="help-preview" data-controls=".extension-version-tag" aria-hidden="true" inert></span>버전 / 도움말</dt><dd>스토어 설치는 확장 버전, 로컬 설치는 패키지 로드 시각을 표시합니다. 클릭하면 이 도움말이 열립니다.</dd>
+                            <dt><span class="help-preview" data-controls=".btn-fast-prev,.btn-thick-prev,.btn-thick-next,.btn-fast-next" aria-hidden="true" inert></span>1단어 / 3단어 선택 확장</dt><dd>선택 범위를 해당 방향으로 1단어 또는 3단어 확장합니다. 선택이 없으면 현재 검색 일치를 기준으로 시작하며, 검색어는 바꾸지 않습니다.</dd>
+                            <dt><span class="help-preview" data-controls=".btn-text-select" aria-hidden="true" inert></span>선택 텍스트 복사</dt><dd>선택한 텍스트 또는 현재 검색 일치를 클립보드에 복사합니다. 성공하면 Copied!가 잠시 표시됩니다.</dd>
+                            <dt><span class="help-preview" data-controls=".btn-pin-clip|.btn-bookmark,.btn-clip-delete|.btn-clear" aria-hidden="true" inert></span>오른쪽 색상 핀</dt><dd>저장된 북마크를 열거나 삭제합니다. 북마크는 다른 페이지에서도 같은 목록을 공유합니다.</dd>
+                        </dl>
+                    </section>
+                    <section aria-labelledby="helpKeysTitle">
+                        <h3 id="helpKeysTitle">키보드</h3>
+                        <dl class="help-details">
+                            <dt><kbd>Ctrl + F</kbd> (기본값)</dt><dd>검색창 열기. 확장 설정에서 변경하거나 초기화할 수 있습니다.</dd>
+                            <dt><kbd>Enter</kbd> / <kbd>Shift + Enter</kbd></dt><dd>검색 입력창에서 검색을 실행하거나 다음 / 이전 일치로 이동합니다.</dd>
+                            <dt><kbd>F3</kbd> / <kbd>Shift + F3</kbd> / <kbd>F4</kbd></dt><dd>활성 검색바의 다음 / 이전 / 이전 일치로 이동합니다.</dd>
+                            <dt><kbd>Esc</kbd></dt><dd>검색 입력창에서는 해당 바를 닫고, 페이지에서는 전체 검색창을 닫습니다. 도움말이 열려 있으면 도움말만 닫습니다.</dd>
+                        </dl>
+                    </section>
+                    <section aria-labelledby="helpLimitsTitle">
+                        <h3 id="helpLimitsTitle">검색 범위와 제한</h3>
+                        <p>페이지 본문, 접근 가능한 open Shadow DOM과 동일 출처 iframe을 검색하고, 동적 콘텐츠가 추가되면 다시 검색합니다. 숨겨진 영역과 편집 중인 contenteditable은 제외하며, 바당 최대 1,000개 일치를 표시합니다.</p>
+                        <p>교차 출처 iframe, closed Shadow DOM, 이미지·canvas 안의 글자, Chrome 보호 페이지와 내장 PDF 뷰어는 검색할 수 없습니다. 확장을 다시 로드한 뒤에는 기존 페이지도 새로고침해야 합니다.</p>
+                    </section>
+                </div>
+                <div class="help-body" id="helpSettingPanel" role="tabpanel" aria-labelledby="helpSettingTab" tabindex="0" hidden>
+                    <p>브라우저 툴바의 multi-search 아이콘을 누르면 아래 설정 화면이 열립니다.</p>
+                    <figure class="help-figure">
+                        <img class="help-setting-image" alt="multi-search 설정 화면. 검색창 열기, 검색 호출 단축키, dashboard 패널표시, 기본 검색바 개수, 자동 이동, 무시구분자, 일반·활성 하이라이트 색상과 피드백 연락처가 표시됩니다." width="360" height="347">
+                        <figcaption>기본값으로 캡처한 실제 설정 화면입니다. 아래 라벨은 화면의 각 항목과 대응합니다.</figcaption>
+                    </figure>
+                    <section aria-labelledby="helpSettingItemsTitle">
+                        <h3 id="helpSettingItemsTitle">설정 화면 항목</h3>
+                        <ol class="help-items">
+                            <li><strong><span class="help-setting-label help-setting-action" aria-hidden="true">현재 페이지에서 검색창 열기</span>검색 시작</strong><p>현재 탭에 검색바를 열고 설정 팝업을 닫습니다. Chrome 보호 페이지처럼 확장을 실행할 수 없는 페이지에서는 사용할 수 없습니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">검색 호출 단축키 · Ctrl + F · 변경 · 초기화</span>호출 키 변경</strong><p>변경을 누르고 원하는 키 조합을 입력해 저장합니다. 초기화는 기본 Ctrl + F로 복원합니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">dashboard 패널표시</span>대시보드 표시</strong><p>체크하면 대시보드를 표시합니다. 첫 검색바 왼쪽 위·아래 화살표로 여닫은 상태와 양방향으로 동기화됩니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">기본 검색바 개수 (초기값) · 2 개</span>초기 구성</strong><p>초기 검색바 개수를 1~6개로 지정합니다. 변경하면 이전 검색바 구성은 초기화되어 다음 생성 시 새 개수를 사용합니다. 검색바의 + 버튼으로 더 추가할 수 있습니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">첫 일치 항목 자동 이동 (Auto-Move)</span>자동 스크롤</strong><p>켜면 검색 시 첫 일치 위치로 자동 이동합니다. 끄면 현재 화면 위치를 유지하고 화살표나 단축키로 직접 이동합니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">선택기능 무시구분자 · -</span>단어 선택 확장</strong><p>대시보드에서 단어 선택을 확장할 때 입력한 문자를 구분자로 취급하지 않습니다. 기본 -는 im-him을 하나의 단어로 연결합니다. 검색 옵션의 ByWord와는 별도 설정입니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">1번 검색바 하이라이트 색상 <span class="color-badge" style="background-color: #ffe600"></span><span class="color-badge" style="background-color: #ff8f00"></span></span>일반 / 활성 색상</strong><p>일반 색상은 첫 검색바의 전체 일치 항목, 활성 색상은 현재 선택한 일치 항목에 사용됩니다. 각 색상 칸을 눌러 변경합니다. 다른 검색바는 고유 팔레트를 사용합니다.</p></li>
+                            <li><strong><span class="help-setting-label" aria-hidden="true">Donate &amp; feedback</span>후원 / 피드백</strong><p>설정 화면에 표시된 av9300@gmail.com으로 피드백을 보낼 수 있습니다.</p></li>
+                        </ol>
+                    </section>
+                    <section aria-labelledby="helpSettingsTitle">
+                        <h3 id="helpSettingsTitle">설정과 자동 저장</h3>
+                        <p>확장 아이콘에서 검색창 열기, 호출 단축키, 대시보드 표시, 기본 검색바 개수(1~6), 첫 일치 자동 이동, 단어 확장 시 무시할 구분자(기본 -), 첫 검색바의 일반·활성 하이라이트 색상을 설정합니다. 설정은 즉시 저장됩니다.</p>
+                        <p>마지막 검색바 개수·검색어·일치 옵션을 기억해 다음 실행 시 복원합니다. 기본 바 개수를 변경하면 이전 바 구성은 초기화됩니다. 후원·피드백 연락처는 설정창에 표시됩니다.</p>
+                    </section>
+                </div>
+            `;
+            helpDialog.querySelector('.help-setting-image').src = chrome.runtime.getURL('help-setting.png');
+            helpDialog.querySelectorAll('.help-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    helpDialog.querySelectorAll('.help-tab').forEach(otherTab => {
+                        const selected = otherTab === tab;
+                        otherTab.setAttribute('aria-selected', String(selected));
+                        otherTab.tabIndex = selected ? 0 : -1;
+                        helpDialog.querySelector(`#${otherTab.getAttribute('aria-controls')}`).hidden = !selected;
+                    });
+                    helpDialog.scrollTop = 0;
+                });
+            });
+            helpDialog.querySelector('.help-search-image').src = chrome.runtime.getURL('help-search-bar.png');
+            helpDialog.querySelector('.help-close').addEventListener('click', () => helpDialog.close());
+            helpDialog.addEventListener('click', event => {
+                if (event.target !== helpDialog) return;
+                const rect = helpDialog.getBoundingClientRect();
+                if (event.clientX < rect.left || event.clientX > rect.right ||
+                    event.clientY < rect.top || event.clientY > rect.bottom) helpDialog.close();
+            });
+            shadowRoot.appendChild(helpDialog);
+        }
+        helpDialog.querySelectorAll('.help-preview').forEach(preview => {
+            preview.replaceChildren();
+            preview.dataset.controls.split(',').forEach(selectors => {
+                const source = selectors.split('|').map(selector => barsContainer.querySelector(selector)).find(Boolean);
+                if (!source) return;
+                const clone = source.cloneNode(true);
+                clone.removeAttribute('id');
+                clone.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
+                preview.appendChild(clone);
+            });
+        });
+        if (!helpDialog.open) helpDialog.showModal();
     }
 
     function createUI() {
@@ -438,6 +584,7 @@
                 max-width: calc(100vw - 28px);
             }
             .search-bar {
+                position: relative;
                 display: flex;
                 align-items: center;
                 background-color: #2b2d3c;
@@ -455,6 +602,39 @@
             }
             .search-bar.active-bar {
                 border-color: #5b6282;
+            }
+            .btn-dashboard-toggle {
+                position: absolute;
+                top: 50%;
+                left: -29px;
+                transform: translateY(-50%);
+                width: 22px;
+                height: 22px;
+                border: none;
+                outline: none;
+                border-radius: 50%;
+                background-color: #383a4c;
+                color: #d1d4e2;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                padding: 0;
+                z-index: 1;
+                transition: background-color 0.12s, color 0.12s;
+            }
+            .btn-dashboard-toggle:hover {
+                background-color: #4d72b8;
+                color: #ffffff;
+            }
+            .btn-dashboard-toggle svg {
+                width: 14px;
+                height: 14px;
+                fill: currentColor;
+                transform: rotate(-90deg);
+            }
+            .btn-dashboard-toggle[aria-expanded="true"] svg {
+                transform: rotate(90deg);
             }
             .btn-add {
                 background-color: #383a4c;
@@ -744,16 +924,243 @@
             .extension-version-tag {
                 position: relative;
                 top: -3px;
-                font-size: 9px;
+                font-size: 11px;
                 font-weight: 600;
                 color: #94a3b8;
-                letter-spacing: 0.5px;
+                letter-spacing: 0;
                 line-height: 1;
                 padding: 0;
                 user-select: text;
-                cursor: default;
+                cursor: pointer;
                 text-align: left;
+                background: transparent;
+                border: none;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            }
+            .extension-version-tag:hover {
+                color: #e1e3ea;
+            }
+            .extension-version-tag:focus-visible, .help-close:focus-visible {
+                outline: 2px solid #38bdf8;
+                outline-offset: 3px;
+            }
+            .help-dialog {
+                position: fixed;
+                inset: 0;
+                margin: auto;
+                width: min(880px, calc(100vw - 24px));
+                max-height: calc(100dvh - 32px);
+                padding: 0;
+                border: 1px solid #5b6282;
+                border-radius: 8px;
+                background: #20222f;
+                color: #e1e3ea;
+                font-family: inherit;
+                font-size: 13px;
+                line-height: 1.6;
+                box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+                overflow: auto;
+                overflow-wrap: anywhere;
+            }
+            .help-dialog::backdrop {
+                background: rgba(0, 0, 0, 0.55);
+            }
+            .help-header {
+                position: sticky;
+                top: 0;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 14px 20px;
+                background: #2b2d3c;
+                border-bottom: 1px solid #3d4054;
+                z-index: 1;
+            }
+            .help-tabs {
+                display: flex;
+                flex-basis: 100%;
+                gap: 6px;
+            }
+            .help-tab {
+                min-width: 100px;
+                padding: 6px 12px;
+                border: none;
+                border-bottom: 2px solid transparent;
+                background: transparent;
+                color: #aeb3c5;
+                font-family: inherit;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            .help-tab[aria-selected="true"] {
+                border-bottom-color: #38bdf8;
+                color: #ffffff;
+            }
+            .help-tab:hover {
+                background: #383a4c;
+            }
+            .help-tab:focus-visible {
+                outline: 2px solid #38bdf8;
+                outline-offset: -2px;
+            }
+            .help-body[hidden] {
+                display: none;
+            }
+            .help-header h2 {
+                font-size: 18px;
+                font-weight: 600;
+            }
+            .help-close {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 28px;
+                height: 28px;
+                flex-shrink: 0;
+                border: none;
+                border-radius: 50%;
+                background: #383a4c;
+                color: #d1d4e2;
+                cursor: pointer;
+            }
+            .help-close:hover {
+                background: #ed4245;
+                color: #ffffff;
+            }
+            .help-close svg {
+                width: 16px;
+                height: 16px;
+            }
+            .help-body {
+                padding: 18px 20px 24px;
+            }
+            .help-body section {
+                margin-top: 20px;
+                padding-top: 16px;
+                border-top: 1px solid #3d4054;
+            }
+            .help-body h3 {
+                font-size: 15px;
+                color: #38bdf8;
+                margin-bottom: 10px;
+            }
+            .help-body p + p {
+                margin-top: 8px;
+            }
+            .help-figure {
+                margin-top: 16px;
+            }
+            .help-image-scroll {
+                overflow-x: auto;
+            }
+            .help-search-image {
+                display: block;
+                width: 100%;
+                min-width: 680px;
+                height: auto;
+            }
+            .help-setting-image {
+                display: block;
+                width: 360px;
+                max-width: 100%;
+                height: auto;
+                margin: 0 auto;
+            }
+            .help-setting-label {
+                display: inline-flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 4px;
+                max-width: 100%;
+                padding: 3px 6px;
+                border: 1px solid #d3d7db;
+                border-radius: 4px;
+                background: #f6f7f8;
+                color: #20252a;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            .help-setting-action {
+                border-color: #218838;
+                background: #218838;
+                color: #ffffff;
+            }
+            .help-figure figcaption {
+                margin-top: 8px;
+                color: #aeb3c5;
+                font-size: 12px;
+            }
+            .help-items {
+                padding-left: 24px;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 14px 28px;
+            }
+            .help-items li::marker {
+                color: #38bdf8;
+                font-weight: 600;
+            }
+            .help-items strong, .help-details dt {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 6px 8px;
+            }
+            .help-preview {
+                display: inline-flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 4px;
+                max-width: 100%;
+                pointer-events: none;
+                user-select: none;
+            }
+            .help-preview .btn-dashboard-toggle {
+                position: static;
+                transform: none;
+            }
+            .help-preview .btn-clear {
+                visibility: visible;
+            }
+            .help-preview .extension-version-tag {
+                top: 0;
+            }
+            .help-details kbd {
+                padding: 1px 5px;
+                border: 1px solid #5b6282;
+                border-radius: 4px;
+                background: #383a4c;
+                font-family: inherit;
+                font-size: 12px;
+            }
+            .help-items p {
+                margin-top: 3px;
+                color: #c0c4d6;
+            }
+            .help-details {
+                display: grid;
+                grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
+                gap: 8px 16px;
+            }
+            .help-details dt {
+                font-weight: 600;
+            }
+            .help-details dd {
+                color: #c0c4d6;
+            }
+            @media (max-width: 600px) {
+                .help-header, .help-body {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                }
+                .help-items, .help-details {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+                .help-details dd {
+                    margin-bottom: 8px;
+                }
             }
             .text-select-row {
                 display: flex;
@@ -871,7 +1278,7 @@
         updateDashboardVisibility();
         commonBar.innerHTML = `
             <div class="common-left-group">
-                <div class="extension-version-tag" id="extensionVersionTag" title="Extension Version">--</div>
+                <button type="button" class="extension-version-tag" id="extensionVersionTag" title="multi-search 도움말" aria-haspopup="dialog">--</button>
                 <div class="text-select-row">
                     <button type="button" class="btn-thick-nav btn-fast-prev" title="선택 영역 왼쪽 3단어 확장 (Expand selection 3 words left)">
                         <svg viewBox="0 0 24 24">
@@ -906,9 +1313,10 @@
         // 확장 프로그램 버전 또는 로컬 패키지 로드 시각 표시
         const versionTag = commonBar.querySelector('#extensionVersionTag');
         if (versionTag) {
+            versionTag.addEventListener('click', showHelpDialog);
             getDisplayVersion((ver, isStore) => {
                 versionTag.textContent = `ver ${ver}`;
-                versionTag.title = isStore ? `Marketplace Version: ${ver}` : `Local Package Loaded: ${ver}`;
+                versionTag.title = `${isStore ? 'Marketplace Version' : 'Local Package Loaded'}: ${ver} - multi-search 도움말`;
             });
         }
 
@@ -1027,7 +1435,19 @@
             </div>
         `;
 
+        if (barIndex === 0) {
+            dashboardToggleButton = document.createElement('button');
+            dashboardToggleButton.type = 'button';
+            dashboardToggleButton.className = 'btn-dashboard-toggle';
+            dashboardToggleButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>';
+            dashboardToggleButton.addEventListener('click', () => {
+                setDashboardVisible(!config.showDashboard);
+            });
+            row.appendChild(dashboardToggleButton);
+        }
+
         barsContainer.appendChild(row);
+        updateDashboardVisibility();
 
         // 검색바 인스턴스 데이터 구조 및 UI 엘리먼트 캐싱
         const bar = {
@@ -1227,6 +1647,9 @@
         const index = bars.indexOf(bar);
         if (index !== -1) {
             bars.splice(index, 1);
+            if (index === 0 && dashboardToggleButton && bars[0]) {
+                bars[0].rowEl.appendChild(dashboardToggleButton);
+            }
             bar.rowEl.remove();
         }
 
@@ -1264,8 +1687,7 @@
         };
 
         bookmarks.push(newBookmark);
-        dashboardTemporarilyVisible = true;
-        updateDashboardVisibility();
+        setDashboardVisible(true);
         saveBookmarks();
         renderBookmarks();
     }
@@ -1712,6 +2134,7 @@
         bars.forEach(b => {
             b.rowEl.remove();
         });
+        dashboardToggleButton = null;
         bars = [];
         activeBar = null;
     }
@@ -2520,6 +2943,24 @@
 
     // 웹페이지 전역 키보드 단축키 및 F3/F4 탐색 이벤트 리스너
     window.addEventListener('keydown', (e) => {
+        if (helpDialog?.open) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                helpDialog.close();
+            }
+            const helpTab = e.composedPath().find(node => node instanceof HTMLElement && node.classList.contains('help-tab'));
+            if (helpTab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault();
+                const tabs = [...helpDialog.querySelectorAll('.help-tab')];
+                const index = tabs.indexOf(helpTab);
+                const nextIndex = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 :
+                    (index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                tabs[nextIndex].click();
+                tabs[nextIndex].focus();
+            }
+            e.stopImmediatePropagation();
+            return;
+        }
         const inputBar = getSearchBarFromKeyEvent(e);
         if (inputBar) {
             handleSearchInputKeydown(e, inputBar);

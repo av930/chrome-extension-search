@@ -78,6 +78,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const highlightColorInput = document.getElementById('highlightColor');
     const activeHighlightColorInput = document.getElementById('activeHighlightColor');
 
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'sync' && changes.showDashboard) {
+            showDashboardToggle.checked = changes.showDashboard.newValue === true;
+        }
+    });
+
     // 스토리지에 저장된 사용자 설정값 불러오기
     chrome.storage.sync.get([
         'shortcut',

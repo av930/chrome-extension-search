@@ -1,11 +1,11 @@
 {
     "manifest_version": 3,
-    "name": "Search Extension",
+    "name": "multi-search",
     "version": "1.0.0",
-    "description": "Chrome search extension basic template",
+    "description": "Multiple in-page search bars with colored highlights, bookmarks, and text selection tools.",
     "action": {
         "default_popup": "popup.html",
-        "default_title": "Search",
+        "default_title": "multi-search",
         "default_icon": {
             "16": "icon16.png",
             "32": "icon32.png",
@@ -21,6 +21,17 @@
     "background": {
         "service_worker": "background.js"
     },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "help-search-bar.png",
+                "help-setting.png"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
     "content_scripts": [
         {
             "matches": [

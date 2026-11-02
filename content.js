@@ -168,7 +168,7 @@
         });
     }
 
-// ## 단계 200: 스토리지 데이터 동기화 및 영구 저장 관리
+// ## 단계 200: 로컬 스토리지 데이터 저장 및 관리
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     //------------------------------------------------------------------------------------------------------
     // chrome.storage.local에 저장된 북마크 배열 데이터를 비동기 조회하여 메모리에 로드한다.
@@ -197,7 +197,7 @@
     }
 
     //------------------------------------------------------------------------------------------------------
-    // chrome.storage.sync에서 사용자 설정(단축키, 바 개수, 색상, 무시구분자 등)을 불러온다.
+    // chrome.storage.local에서 사용자 설정(단축키, 바 개수, 색상, 무시구분자 등)을 불러온다.
     // 입력: callback - 설정 로드 완료 후 실행할 콜백 함수
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
@@ -206,7 +206,7 @@
             if (callback) callback();
             return;
         }
-        chrome.storage.sync.get([
+        chrome.storage.local.get([
             'shortcut',
             'highlightColor',
             'activeHighlightColor',
@@ -264,7 +264,7 @@
             query: b.query || ''
         }));
         config.lastBarsState = state;
-        chrome.storage.sync.set({ lastBarsState: state });
+        chrome.storage.local.set({ lastBarsState: state });
     }
 
     // Chrome Storage 쓰기 한도 쿼터(분당 120회)를 보호하기 위한 저장 디바운스 함수
@@ -305,8 +305,8 @@
             return;
         }
 
-        // 공통 환경설정(싱크 스토리지) 동기화
-        if (areaName !== 'sync') return;
+        // 로컬 환경설정 변경 사항 반영
+        if (areaName !== 'local') return;
         if (changes.showDashboard) {
             config.showDashboard = changes.showDashboard.newValue === true;
             updateDashboardVisibility();
@@ -411,7 +411,7 @@
     function setDashboardVisible(isVisible) {
         config.showDashboard = isVisible;
         updateDashboardVisibility();
-        if (chrome.runtime?.id) chrome.storage.sync.set({ showDashboard: isVisible });
+        if (chrome.runtime?.id) chrome.storage.local.set({ showDashboard: isVisible });
     }
 
     function showHelpDialog() {

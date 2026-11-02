@@ -79,13 +79,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeHighlightColorInput = document.getElementById('activeHighlightColor');
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName === 'sync' && changes.showDashboard) {
+        if (areaName === 'local' && changes.showDashboard) {
             showDashboardToggle.checked = changes.showDashboard.newValue === true;
         }
     });
 
     // 스토리지에 저장된 사용자 설정값 불러오기
-    chrome.storage.sync.get([
+    chrome.storage.local.get([
         'shortcut',
         'autoMove',
         'showDashboard',
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shortcutDisplay.value = formatShortcutString(currentShortcut);
 
         // 스토리지에 새 단축키 영구 저장
-        chrome.storage.sync.set({ shortcut: currentShortcut }, () => {
+        chrome.storage.local.set({ shortcut: currentShortcut }, () => {
             showToast('단축키가 저장되었습니다.');
         });
     });
@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         shortcutDisplay.classList.remove('recording');
         shortcutDisplay.value = formatShortcutString(currentShortcut);
 
-        chrome.storage.sync.set({ shortcut: currentShortcut }, () => {
+        chrome.storage.local.set({ shortcut: currentShortcut }, () => {
             showToast('Ctrl + F로 초기화되었습니다.');
         });
     });
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ## 단계 230: 옵션 변경 실시간 저장 이벤트
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     showDashboardToggle.addEventListener('change', () => {
-        chrome.storage.sync.set({ showDashboard: showDashboardToggle.checked }, () => {
+        chrome.storage.local.set({ showDashboard: showDashboardToggle.checked }, () => {
             showToast('대시보드 패널 표시 설정이 저장되었습니다.');
         });
     });
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (count > 6) count = 6;
         defaultBarCountInput.value = count;
 
-        chrome.storage.sync.set({
+        chrome.storage.local.set({
             defaultBarCount: count,
             lastBarsState: null // 새 기본 개수로 열리도록 이전 상태 리셋
         }, () => {
@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 자동 스크롤 이동(Auto-Move) 토글 변경
     autoMoveToggle.addEventListener('change', () => {
-        chrome.storage.sync.set({ autoMove: autoMoveToggle.checked }, () => {
+        chrome.storage.local.set({ autoMove: autoMoveToggle.checked }, () => {
             showToast('자동 이동 설정이 저장되었습니다.');
         });
     });
@@ -264,21 +264,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // 선택기능 무시구분자 변경
     ignoreDelimitersInput.addEventListener('change', () => {
         const val = ignoreDelimitersInput.value;
-        chrome.storage.sync.set({ ignoreDelimiters: val }, () => {
+        chrome.storage.local.set({ ignoreDelimiters: val }, () => {
             showToast('무시 구분자 설정이 저장되었습니다.');
         });
     });
 
     // 일반 일치 하이라이트 색상 변경
     highlightColorInput.addEventListener('change', () => {
-        chrome.storage.sync.set({ highlightColor: highlightColorInput.value }, () => {
+        chrome.storage.local.set({ highlightColor: highlightColorInput.value }, () => {
             showToast('하이라이트 색상이 저장되었습니다.');
         });
     });
 
     // 활성 일치 하이라이트 색상 변경
     activeHighlightColorInput.addEventListener('change', () => {
-        chrome.storage.sync.set({ activeHighlightColor: activeHighlightColorInput.value }, () => {
+        chrome.storage.local.set({ activeHighlightColor: activeHighlightColorInput.value }, () => {
             showToast('활성 색상이 저장되었습니다.');
         });
     });

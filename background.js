@@ -19,6 +19,62 @@ function formatPackageLoadTime(date = new Date()) {
     return `${yy}${mm}${dd}.${hh}${min}`;
 }
 
+const USER_SETTING_KEYS = [
+    'shortcut',
+    'autoMove',
+    'showDashboard',
+    'highlightColor',
+    'activeHighlightColor',
+    'defaultBarCount',
+    'lastBarsState',
+    'ignoreDelimiters'
+];
+const LEGACY_SYNC_CLEANUP_KEY = 'legacySyncCleanupComplete';
+
+function initializeLocalSettings() {
+    chrome.storage.local.get(USER_SETTING_KEYS, (result) => {
+        const defaults = {};
+
+        if (!result.shortcut) defaults.shortcut = { ctrl: true, alt: false, shift: false, meta: false, key: 'f' };
+        if (typeof result.autoMove !== 'boolean') defaults.autoMove = true;
+        if (typeof result.showDashboard !== 'boolean') defaults.showDashboard = false;
+        if (!result.highlightColor) defaults.highlightColor = '#ffe600';
+        if (!result.activeHighlightColor) defaults.activeHighlightColor = '#ff8f00';
+        if (typeof result.defaultBarCount !== 'number') defaults.defaultBarCount = 2;
+        if (typeof result.ignoreDelimiters !== 'string') defaults.ignoreDelimiters = '-';
+
+        if (Object.keys(defaults).length > 0) chrome.storage.local.set(defaults);
+    });
+}
+
+function migrateLegacySyncSettings() {
+    chrome.storage.local.get([...USER_SETTING_KEYS, LEGACY_SYNC_CLEANUP_KEY], (localSettings) => {
+        if (localSettings[LEGACY_SYNC_CLEANUP_KEY]) {
+            initializeLocalSettings();
+            return;
+        }
+
+        chrome.storage.sync.get(USER_SETTING_KEYS, (syncSettings) => {
+            const migratedSettings = {};
+            USER_SETTING_KEYS.forEach((key) => {
+                if (typeof localSettings[key] === 'undefined' && typeof syncSettings[key] !== 'undefined') {
+                    migratedSettings[key] = syncSettings[key];
+                }
+            });
+
+            chrome.storage.local.set(migratedSettings, () => {
+                chrome.storage.sync.clear(() => {
+                    if (chrome.runtime.lastError) {
+                        initializeLocalSettings();
+                        return;
+                    }
+                    chrome.storage.local.set({ [LEGACY_SYNC_CLEANUP_KEY]: true }, initializeLocalSettings);
+                });
+            });
+        });
+    });
+}
+
 // 서비스 워커 초기 로드 시 패키지 로드 시각 저장 상태 확인
 chrome.storage.local.get(['packageLoadTime'], (res) => {
     if (!res || !res.packageLoadTime) {
@@ -37,50 +93,5 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.storage.local.set({ packageLoadTime: formatPackageLoadTime(new Date()) });
     }
 
-    // 스토리지에 기본 설정값이 없을 경우 기본값으로 초기화
-    chrome.storage.sync.get([
-        'shortcut',
-        'autoMove',
-        'showDashboard',
-        'highlightColor',
-        'activeHighlightColor',
-        'defaultBarCount',
-        'lastBarsState',
-        'ignoreDelimiters'
-    ], (result) => {
-        const defaults = {};
-
-        // 기본 단축키: Ctrl + F
-        if (!result.shortcut) {
-            defaults.shortcut = { ctrl: true, alt: false, shift: false, meta: false, key: 'f' };
-        }
-        // 첫 번째 일치 항목 자동 스크롤 이동 기본값: true
-        if (typeof result.autoMove !== 'boolean') {
-            defaults.autoMove = true;
-        }
-        if (typeof result.showDashboard !== 'boolean') {
-            defaults.showDashboard = false;
-        }
-        // 기본 일치 하이라이트 색상: 노란색
-        if (!result.highlightColor) {
-            defaults.highlightColor = '#ffe600';
-        }
-        // 활성 일치 하이라이트 색상: 주황색
-        if (!result.activeHighlightColor) {
-            defaults.activeHighlightColor = '#ff8f00';
-        }
-        // 기본 검색바 개수 초기값: 2개
-        if (typeof result.defaultBarCount !== 'number') {
-            defaults.defaultBarCount = 2;
-        }
-        // 선택기능 단어 확장 시 무시할 구분자 기본값: '-'
-        if (typeof result.ignoreDelimiters !== 'string') {
-            defaults.ignoreDelimiters = '-';
-        }
-
-        // 미설정 항목이 있는 경우 스토리지에 일괄 저장
-        if (Object.keys(defaults).length > 0) {
-            chrome.storage.sync.set(defaults);
-        }
-    });
+    migrateLegacySyncSettings();
 });

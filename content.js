@@ -124,7 +124,7 @@
 // ## 단계 110: 페이지 로딩 감지 및 검색 제한 상태 관리
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // 최소 증분 검색 글자 수 및 로딩 중 안내 메시지 상수
-    const MIN_SEARCH_LENGTH = 3;
+    const MIN_SEARCH_LENGTH = 2;
     const LOADING_NOTICE_TEXT = '페이지 로딩완료후 검색 가능';
     let isPageLoading = (document.readyState !== 'complete');
 
@@ -444,7 +444,7 @@
                             <li><strong><span class="help-preview" data-controls=".btn-add" aria-hidden="true" inert></span>+: 검색바 추가</strong><p>다른 검색어를 별도의 바에서 검색합니다. 바마다 색상, 일치 옵션, 현재 위치가 독립적입니다.</p></li>
                             <li><strong><span class="help-preview" data-controls=".btn-close" aria-hidden="true" inert></span>닫기: 검색바 제거</strong><p>해당 바와 하이라이트를 제거합니다. 마지막 바를 닫으면 전체 검색창이 숨겨집니다.</p></li>
                             <li><strong><span class="help-preview" data-controls=".color-badge" aria-hidden="true" inert></span>색상 점: 하이라이트 색상</strong><p>검색어마다 고유 색상을 사용하고 현재 일치는 별도 활성 색상으로 표시합니다. 입력창을 선택하면 해당 검색바가 활성화됩니다.</p></li>
-                            <li><strong><span class="help-preview" data-controls=".search-label" aria-hidden="true" inert></span>검색어 입력</strong><p>3글자부터 자동 검색합니다. 1~2글자는 Enter로 실행합니다. 페이지 로딩 중에는 검색을 기다립니다. 페이지에서 선택한 짧은 텍스트는 검색창을 열 때 자동 입력됩니다.</p></li>
+                            <li><strong><span class="help-preview" data-controls=".search-label" aria-hidden="true" inert></span>검색어 입력</strong><p>2글자부터 자동 검색합니다. 1글자는 Enter로 실행합니다. 페이지 로딩 중에는 검색을 기다립니다. 페이지에서 선택한 짧은 텍스트는 검색창을 열 때 자동 입력됩니다.</p></li>
                             <li><strong><span class="help-preview" data-controls=".count-info,.btn-clear" aria-hidden="true" inert></span>일치 건수 / 검색어 지우기</strong><p>현재 일치 위치와 전체 건수를 표시합니다. 입력창 안의 닫기 아이콘은 검색어와 해당 하이라이트를 지웁니다.</p></li>
                             <li><strong><span class="help-preview" data-controls=".nav-group" aria-hidden="true" inert></span>왼쪽·오른쪽 화살표: 이전·다음</strong><p>활성 검색어의 일치 위치로 스크롤합니다. 마지막과 처음 사이를 순환하며, 접힌 details 영역은 펼쳐서 보여줍니다.</p></li>
                             <li><strong><span class="help-preview" data-controls=".opt-case,.opt-word,.opt-regex" aria-hidden="true" inert></span>검색 옵션</strong><p>MatchCase는 대소문자 구분, ByWord는 단어 단위 일치, RegExp는 정규 표현식 검색입니다. 잘못된 정규식은 입력창 테두리로 표시됩니다.</p></li>
@@ -1527,7 +1527,7 @@
             bar.forceSearch = false;
             bar.ui.btnClear.classList.toggle('visible', !!bar.query);
 
-            // 3글자 이상부터 증분 검색(incremental search) 수행
+            // 2글자 이상부터 증분 검색(incremental search) 수행
             const raw = bar.useRegex ? bar.query : bar.query.trim();
             if (raw.length < MIN_SEARCH_LENGTH) {
                 if (bar.matches.length > 0) {
@@ -2363,7 +2363,7 @@
         const searchRoots = collectSearchRoots();
         cleanAllHighlights(searchRoots);
 
-        // 유효한 검색 패턴이 있는 검색바들만 선별 (3글자 이상만 증분 검색 허용, 엔터 강제 검색 시 예외)
+        // 유효한 검색 패턴이 있는 검색바들만 선별 (2글자 이상만 증분 검색 허용, 엔터 강제 검색 시 예외)
         const activeSearchBars = [];
         bars.forEach(bar => {
             const raw = bar.useRegex ? bar.query : bar.query.trim();

@@ -2361,6 +2361,7 @@
 
         // 본문 + Shadow DOM + 동일 출처 iframe을 모두 포함한 검색 루트를 1회만 수집하여 재사용
         const searchRoots = collectSearchRoots();
+        attachMouseSync(searchRoots);
         cleanAllHighlights(searchRoots);
 
         // 유효한 검색 패턴이 있는 검색바들만 선별 (3글자 이상만 증분 검색 허용, 엔터 강제 검색 시 예외)
@@ -2681,7 +2682,7 @@
     // 입력: bar - 검색바 인스턴스 객체
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
-    function highlightActiveMatch(bar) {
+    function highlightActiveMatch(bar, takeFocus = false) {
         const inputMatchesMap = new Map();
 
         bar.matches.forEach((match, i) => {
@@ -2722,12 +2723,16 @@
                 el.classList.remove('search-ext-input-highlight');
                 el.style.outline = `2px solid ${bar.colorConfig.activeOutline}`;
                 el.style.outlineOffset = '-1px';
-                try {
-                    el.focus({ preventScroll: true });
-                    if (typeof el.setSelectionRange === 'function') {
-                        el.setSelectionRange(entry.activeMatch.start, entry.activeMatch.end);
-                    }
-                } catch (e) {}
+                // 포커스/선택 영역 이동은 사용자가 명시적으로 이전/다음 탐색을 했을 때만 수행한다.
+                // 재검색(입력/DOM 변경)이나 마우스 클릭 동기화 때 호출되면 사용자가 클릭한 캐럿 위치를 덮어쓰게 된다.
+                if (takeFocus) {
+                    try {
+                        el.focus({ preventScroll: true });
+                        if (typeof el.setSelectionRange === 'function') {
+                            el.setSelectionRange(entry.activeMatch.start, entry.activeMatch.end);
+                        }
+                    } catch (e) {}
+                }
             } else {
                 el.classList.remove('search-ext-input-active');
                 el.classList.add('search-ext-input-highlight');
@@ -2736,6 +2741,59 @@
             }
         });
     }
+
+    //------------------------------------------------------------------------------------------------------
+    // 마우스로 클릭/선택한 위치의 일치 항목을 해당 검색바의 현재 항목(currentIndex)으로 동기화한다.
+    // <mark> 하이라이트는 클릭된 mark, input/textarea는 캐럿(selectionStart)이 포함된 일치 구간을 사용한다.
+    // 포커스와 선택 영역은 건드리지 않아 사용자가 클릭한 캐럿 위치가 그대로 유지된다.
+    // 입력: e - MouseEvent (mouseup)
+    // 출력: 없음
+    //------------------------------------------------------------------------------------------------------
+    function syncActiveMatchFromMouse(e) {
+        if (!isBarVisible || bars.length === 0 || e.button !== 0) return;
+        const target = e.composedPath ? e.composedPath()[0] : e.target;
+        if (!target || target.nodeType !== Node.ELEMENT_NODE) return;
+
+        let hitBar = null;
+        let hitIndex = -1;
+
+        const mark = target.closest ? target.closest('mark.search-ext-highlight') : null;
+        if (mark) {
+            hitBar = bars.find(b => String(b.id) === mark.dataset.barId) || null;
+            if (hitBar) hitIndex = hitBar.matches.findIndex(m => m.element === mark);
+        } else if (isSearchableInputElement(target) && !target.classList.contains('search-input')) {
+            let caret = -1;
+            try { caret = target.selectionStart; } catch (err) {}
+            if (typeof caret !== 'number' || caret < 0) return;
+            const candidates = activeBar ? [activeBar, ...bars.filter(b => b !== activeBar)] : bars;
+            for (const b of candidates) {
+                const idx = b.matches.findIndex(m =>
+                    m.type === 'input' && m.element === target && caret >= m.start && caret <= m.end);
+                if (idx !== -1) { hitBar = b; hitIndex = idx; break; }
+            }
+        }
+
+        if (!hitBar || hitIndex < 0) return;
+        if (hitBar === activeBar && hitBar.currentIndex === hitIndex) return;
+
+        hitBar.currentIndex = hitIndex;
+        setActiveBar(hitBar);
+        updateCountDisplay(hitBar, hitIndex + 1, hitBar.matches.length);
+        highlightActiveMatch(hitBar);
+    }
+
+    // 동일 출처 iframe 문서에는 최상위 window 리스너가 도달하지 않으므로 문서별로 1회만 별도 등록
+    const mouseSyncWindows = new WeakSet();
+    function attachMouseSync(roots) {
+        roots.forEach(root => {
+            const win = root.ownerDocument && root.ownerDocument.defaultView;
+            if (!win || win === window || mouseSyncWindows.has(win)) return;
+            mouseSyncWindows.add(win);
+            try { win.addEventListener('mouseup', syncActiveMatchFromMouse, true); } catch (err) {}
+        });
+    }
+
+    window.addEventListener('mouseup', syncActiveMatchFromMouse, true);
 
     //------------------------------------------------------------------------------------------------------
     // 활성화된 일치 항목 엘리먼트를 화면 중앙으로 부드럽게 스크롤한다.
@@ -2829,7 +2887,7 @@
 
         bar.currentIndex = (bar.currentIndex + 1) % total;
         updateCountDisplay(bar, bar.currentIndex + 1, total);
-        highlightActiveMatch(bar);
+        highlightActiveMatch(bar, true);
         scrollToCurrentMatch(bar);
     }
 
@@ -2844,7 +2902,7 @@
 
         bar.currentIndex = (bar.currentIndex - 1 + total) % total;
         updateCountDisplay(bar, bar.currentIndex + 1, total);
-        highlightActiveMatch(bar);
+        highlightActiveMatch(bar, true);
         scrollToCurrentMatch(bar);
     }
 

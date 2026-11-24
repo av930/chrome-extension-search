@@ -2882,10 +2882,17 @@
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function moveToNext(bar) {
-        const total = bar.matches.length;
+        let total = bar.matches.length;
         if (total === 0) return;
 
-        bar.currentIndex = (bar.currentIndex + 1) % total;
+        // 마지막 → 처음으로 순환(page wrap)하는 경우 사용자가 페이지를 수정했을 수 있으므로 재검색으로 건수 갱신
+        if (bar.currentIndex + 1 >= total) {
+            if (!rescanOnWrap(bar, false)) return;
+            total = bar.matches.length;
+        } else {
+            bar.currentIndex++;
+        }
+
         updateCountDisplay(bar, bar.currentIndex + 1, total);
         highlightActiveMatch(bar, true);
         scrollToCurrentMatch(bar);
@@ -2897,13 +2904,47 @@
     // 출력: 없음
     //------------------------------------------------------------------------------------------------------
     function moveToPrev(bar) {
-        const total = bar.matches.length;
+        let total = bar.matches.length;
         if (total === 0) return;
 
-        bar.currentIndex = (bar.currentIndex - 1 + total) % total;
+        // 처음 → 마지막으로 순환(page wrap)하는 경우 재검색으로 건수 갱신
+        if (bar.currentIndex - 1 < 0) {
+            if (!rescanOnWrap(bar, true)) return;
+            total = bar.matches.length;
+        } else {
+            bar.currentIndex--;
+        }
+
         updateCountDisplay(bar, bar.currentIndex + 1, total);
         highlightActiveMatch(bar, true);
         scrollToCurrentMatch(bar);
+    }
+
+    //------------------------------------------------------------------------------------------------------
+    // 페이지 순환(wrap) 시점에 전체 검색을 다시 수행해 일치 항목 목록과 건수를 최신 상태로 갱신한다.
+    // 이전 matches는 폐기하고 재구성하며, 다른 검색바의 현재 위치는 가능한 한 유지한다.
+    // 입력: bar - 이동 중인 검색바, toLast - true면 마지막 항목, false면 첫 항목을 현재 위치로 지정
+    // 출력: 재검색 후 일치 항목이 남아 있으면 true, 없으면 false (건수는 0 of 0으로 표시됨)
+    //------------------------------------------------------------------------------------------------------
+    function rescanOnWrap(bar, toLast) {
+        const savedIndexes = new Map(bars.map(b => [b, b.currentIndex]));
+        bars.forEach(b => { b.matches = []; });
+        performAllSearches(null);
+
+        bars.forEach(b => {
+            if (b === bar) return;
+            const idx = savedIndexes.get(b);
+            if (idx >= 0 && idx < b.matches.length && idx !== b.currentIndex) {
+                b.currentIndex = idx;
+                updateCountDisplay(b, idx + 1, b.matches.length);
+                highlightActiveMatch(b);
+            }
+        });
+
+        const total = bar.matches.length;
+        if (total === 0) return false;
+        bar.currentIndex = toLast ? total - 1 : 0;
+        return true;
     }
 
     //------------------------------------------------------------------------------------------------------

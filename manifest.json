@@ -1,57 +1,58 @@
 {
-    "manifest_version": 3,
-    "name": "multi-search",
-    "version": "1.0.2",
-    "description": "Multiple in-page search bars with colored highlights, bookmarks, and text selection tools.",
-    "action": {
-        "default_popup": "popup.html",
-        "default_title": "multi-search",
-        "default_icon": {
-            "16": "icon16.png",
-            "32": "icon32.png",
-            "48": "icon48.png",
-            "128": "icon128.png"
-        }
-    },
-    "permissions": [
-        "storage",
-        "activeTab",
-        "scripting"
-    ],
-    "background": {
-        "service_worker": "background.js"
-    },
-    "web_accessible_resources": [
-        {
-            "resources": [
-                "help-search-bar.png",
-                "help-setting.png"
-            ],
-            "matches": [
-                "<all_urls>"
-            ]
-        }
-    ],
-    "content_scripts": [
-        {
-            "matches": [
-                "http://*/*",
-                "https://*/*",
-                "file://*/*"
-            ],
-            "js": [
-                "content.js"
-            ],
-            "css": [
-                "content.css"
-            ],
-            "run_at": "document_idle"
-        }
-    ],
-    "icons": {
-        "16": "icon16.png",
-        "32": "icon32.png",
-        "48": "icon48.png",
-        "128": "icon128.png"
+  "manifest_version": 3,
+  "name": "multi-search",
+  "version": "1.0.3",
+  "description": "Multiple in-page search bars with colored highlights, bookmarks, and text selection tools.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "multi-search",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
     }
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "help-search-bar.png",
+        "help-setting.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "version_name": "261125_ff2a"
 }

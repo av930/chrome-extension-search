@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "multi-search",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Multiple in-page search bars with colored highlights, bookmarks, and text selection tools.",
   "action": {
     "default_popup": "popup.html",
@@ -54,5 +54,5 @@
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "version_name": "261125_ff2a"
+  "version_name": "261125_ff2a_1"
 }
